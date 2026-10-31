@@ -6,14 +6,17 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 
-function game(reduceMotion = false) {
+function game(reduceMotion = false, { width = 1280, height = 720, pixelRatio = 1 } = {}) {
   const listeners = {}, elements = new Map(), labels = [];
+  const rectangles = [];
+  let recordRectangles = false;
   const noop = () => {};
   const context = new Proxy({ globalAlpha: 1 }, {
     get(target, key) {
       if (key in target) return target[key];
       if (key === 'createLinearGradient') return () => ({ addColorStop: noop });
       if (key === 'fillText') return text => labels.push(text);
+      if (key === 'fillRect') return (...args) => { if (recordRectangles) rectangles.push(args); };
       return noop;
     },
   });
@@ -24,8 +27,8 @@ function game(reduceMotion = false) {
     return elements.get(id);
   };
   const sandbox = {
-    document: { hidden: false, querySelector: element, addEventListener: noop },
-    window: { innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1,
+    document: { hidden: false, querySelector: element, createElement: () => element('scratch'), addEventListener: noop },
+    window: { innerWidth: width, innerHeight: height, devicePixelRatio: pixelRatio, labels,
       addEventListener: (name, handler) => { listeners[name] = handler; },
       matchMedia: () => ({ matches: reduceMotion }),
     },
@@ -37,7 +40,14 @@ function game(reduceMotion = false) {
   const marker = '  updateCountdown();\n  requestAnimationFrame(frame);';
   assert.ok(source.includes(marker));
   vm.runInContext(source.replace(marker, `
-    window.test = { update, draw, restart, finishShopRect, exchangePresentation, project,
+    const originalBitmapText = bitmapText;
+    bitmapText = (context, text, ...args) => { window.labels.push(String(text)); originalBitmapText(context, text, ...args); };
+    window.test = { update, draw, restart, finishShopRect, exchangePresentation, project, pixelText, pixelIcon,
+      geometry: (bounds, vertices) => {
+        let result;
+        withObjectFrame(bounds, () => { result = vertices.map(([u, v, z]) => volumePoint(bounds, u, v, z)); });
+        return result;
+      },
       set: values => {
         if ('time' in values) elapsed = values.time;
         if ('pfand' in values) pfand = values.pfand;
@@ -54,6 +64,8 @@ function game(reduceMotion = false) {
   api.key = (key, repeat = false) => listeners.keydown({ key, repeat, preventDefault: noop });
   api.element = element;
   api.labels = labels;
+  api.rectangles = rectangles;
+  api.captureRectangles = () => { recordRectangles = true; rectangles.length = 0; };
   api.config = sandbox.window.GAME_CONFIG;
   api.advance = seconds => {
     while (seconds > 1e-9) {
@@ -216,5 +228,60 @@ test('small, exact, large and reduced-motion exchanges show the saved results', 
       assert.equal(g.element('#result-pfand').textContent,
         g.element('#exchange-total').textContent.replace('Total Pfand: ', ''));
     }
+  }
+});
+
+test('Retina HUD glyphs and icons occupy whole backing pixels at integer scales', () => {
+  for (const pixelRatio of [1, 1.25, 2, 3]) {
+    const g = game(false, { pixelRatio });
+    g.captureRectangles();
+    g.pixelText('PFAND RUN €15.50', 13.25, 20.5, 2);
+    g.pixelIcon('bottle', 27.3, 40.7, 2);
+    assert.ok(g.rectangles.length > 100);
+    for (const rectangle of g.rectangles) {
+      assert.ok(rectangle.every(Number.isInteger));
+      assert.equal(rectangle[2], Math.round(2 * pixelRatio));
+      assert.equal(rectangle[3], Math.round(2 * pixelRatio));
+    }
+  }
+});
+
+test('projected sign vertices stay pixel-aligned without reversing on approach', () => {
+  for (const pixelRatio of [1, 2, 3]) {
+    const g = game(false, { pixelRatio });
+    let previous = -Infinity;
+    for (let y = -81; y <= 569; y += 0.25) {
+      const [top, foot] = g.geometry({ x: 108, y, width: 54, height: 25.2 },
+        [[0, 1, 87], [0, 1, 0]]);
+      for (const point of [top, foot]) {
+        for (const coordinate of [point.x, point.y]) {
+          assert.ok(Math.abs(coordinate * pixelRatio - Math.round(coordinate * pixelRatio)) < 1e-9);
+        }
+      }
+      assert.ok(top.y >= previous, `top edge reversed at depth ${y}`);
+      previous = top.y;
+    }
+  }
+});
+
+test('HUD uses live score and leaves game state unchanged in portrait and landscape', () => {
+  for (const [width, height] of [[390, 844], [844, 390], [1440, 900], [320, 568]]) {
+    const g = game(false, { width, height, pixelRatio: 2 });
+    g.set({ time: 2, pfand: 31 });
+    const before = JSON.stringify(g.state());
+    g.draw();
+    assert.ok(g.labels.includes('PFAND RUN'));
+    assert.ok(g.labels.includes('2'));
+    assert.equal(JSON.stringify(g.state()), before);
+    g.labels.length = 0;
+    g.set({ time: 5 });
+    g.draw();
+    assert.ok(!g.labels.includes('PFAND RUN'));
+    assert.ok(!g.labels.includes('CROUCH'));
+    assert.ok(!g.labels.includes('KONTROLLEUR!'));
+    assert.ok(!g.labels.some(text => text.startsWith('CRASHES')));
+    g.key('h');
+    g.draw();
+    assert.ok(g.labels.includes('CRASHES 0'));
   }
 });

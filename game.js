@@ -24,6 +24,7 @@
     viewport.pixelRatio = window.devicePixelRatio || 1;
     canvas.width = Math.round(viewport.width * viewport.pixelRatio);
     canvas.height = Math.round(viewport.height * viewport.pixelRatio);
+    ctx.imageSmoothingEnabled = false;
   }
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
@@ -95,6 +96,16 @@
 
   const formatEuros = cents => `€${(cents - cents % 100) / 100}.${String(cents % 100).padStart(2, '0')}`;
 
+  // One unchanged integer-cent calculation for the live display and final exchange.
+  function pfandResult(count) {
+    const totalCents = count * config.bottleValueCents;
+    const leftoverCents = totalCents % config.doenerPriceCents;
+    const doener = (totalCents - leftoverCents) / config.doenerPriceCents;
+    return { bottles: count, totalCents, leftoverCents, doener,
+      exchangedBottles: (totalCents - leftoverCents) / config.bottleValueCents,
+      leftoverBottles: leftoverCents / config.bottleValueCents };
+  }
+
   function arrive() {
     finished = true;
     finishPhase = 'arrival';
@@ -105,12 +116,7 @@
     tollMessage.textContent = '';
     player.action = 'run';
     player.actionRemaining = 0;
-    const totalCents = pfand * config.bottleValueCents;
-    const leftoverCents = totalCents % config.doenerPriceCents;
-    const doener = (totalCents - leftoverCents) / config.doenerPriceCents;
-    finishResults = Object.freeze({ bottles: pfand, totalCents, leftoverCents, doener,
-      exchangedBottles: (totalCents - leftoverCents) / config.bottleValueCents,
-      leftoverBottles: leftoverCents / config.bottleValueCents });
+    finishResults = Object.freeze(pfandResult(pfand));
     status.textContent = 'You reached the Dönerladen!';
     updatePursuit();
     if (pfand === 0) showResults();
@@ -143,7 +149,7 @@
       distanceMeter.value = Math.round(kontrolleurDistance() / config.kontrolleurStartDistance * 100);
       pursuitLabel.textContent = `Kontrolleur distance: ${distanceMeter.value}%`;
     } else {
-      pursuitLabel.textContent = 'Kontrolleur out of view';
+      pursuitLabel.textContent = '';
     }
   }
 
@@ -177,7 +183,7 @@
     lastRowAt = -Infinity;
     lastObstacleAt = -Infinity;
     pfand = 0;
-    pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
+    pfandCounter.textContent = `Pfand: ${pfand} BOTTLES`;
     tollMessageRemaining = 0;
     tollMessage.textContent = '';
     crashes = 0;
@@ -342,8 +348,8 @@
         if (obstacle.lane === player.lane && !caught && !finished && elapsed < config.runDurationSeconds) {
           if (obstacle.definition.type === 'spaeti') {
             pfand = Math.max(0, pfand - config.spaetiCost);
-            pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
-            tollMessage.textContent = `Späti-Preise: -${config.spaetiCost} ${config.bottleEmoji}`;
+            pfandCounter.textContent = `Pfand: ${pfand} BOTTLES`;
+            tollMessage.textContent = `Späti-Preise: -${config.spaetiCost} BOTTLES`;
             tollMessageRemaining = config.spaetiMessageDuration;
           }
         }
@@ -363,7 +369,7 @@
         const action = actionTimeAtStart > crossingTime ? actionAtStart : 'run';
         if (action === 'jump') return true;
         pfand += 1;
-        pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
+        pfandCounter.textContent = `Pfand: ${pfand} BOTTLES`;
         return false; // Remove immediately: every bottle can count only once.
       }
       return bottle.y < config.worldHeight + config.bottleSize;
@@ -376,6 +382,203 @@
     obstacles = obstacles.filter(obstacle => obstacle.y < config.worldHeight +
       Math.max(config.obstacleHeight + config.signPostHeight, config.spaetiHeight));
     if (elapsed >= config.runDurationSeconds) arrive();
+  }
+
+  // Rendering only. Eight existing colors; no gradients or blended UI colors.
+  const ui = {
+    ink: config.colors.uniform, shade: config.colors.road,
+    white: config.colors.signText, green: config.colors.bottle, amber: config.colors.neonAmber,
+    pink: config.colors.neonMagenta, lime: config.colors.scooter,
+    red: config.colors.debugOverlap,
+  };
+  const font = {
+    A: '01110/10001/10001/11111/10001/10001/10001', B: '11110/10001/10001/11110/10001/10001/11110',
+    C: '01111/10000/10000/10000/10000/10000/01111', D: '11110/10001/10001/10001/10001/10001/11110',
+    E: '11111/10000/10000/11110/10000/10000/11111', F: '11111/10000/10000/11110/10000/10000/10000',
+    G: '01111/10000/10000/10111/10001/10001/01111', H: '10001/10001/10001/11111/10001/10001/10001',
+    I: '11111/00100/00100/00100/00100/00100/11111', J: '00111/00010/00010/00010/10010/10010/01100',
+    K: '10001/10010/10100/11000/10100/10010/10001', L: '10000/10000/10000/10000/10000/10000/11111',
+    M: '10001/11011/10101/10101/10001/10001/10001', N: '10001/11001/10101/10011/10001/10001/10001',
+    O: '01110/10001/10001/10001/10001/10001/01110', P: '11110/10001/10001/11110/10000/10000/10000',
+    Q: '01110/10001/10001/10001/10101/10010/01101', R: '11110/10001/10001/11110/10100/10010/10001',
+    S: '01111/10000/10000/01110/00001/00001/11110', T: '11111/00100/00100/00100/00100/00100/00100',
+    U: '10001/10001/10001/10001/10001/10001/01110', V: '10001/10001/10001/10001/10001/01010/00100',
+    W: '10001/10001/10001/10101/10101/10101/01010', X: '10001/10001/01010/00100/01010/10001/10001',
+    Y: '10001/10001/01010/00100/00100/00100/00100', Z: '11111/00001/00010/00100/01000/10000/11111',
+    0: '01110/10001/10011/10101/11001/10001/01110', 1: '00100/01100/00100/00100/00100/00100/01110',
+    2: '01110/10001/00001/00010/00100/01000/11111', 3: '11110/00001/00001/01110/00001/00001/11110',
+    4: '00010/00110/01010/10010/11111/00010/00010', 5: '11111/10000/10000/11110/00001/00001/11110',
+    6: '01110/10000/10000/11110/10001/10001/01110', 7: '11111/00001/00010/00100/01000/01000/01000',
+    8: '01110/10001/10001/01110/10001/10001/01110', 9: '01110/10001/10001/01111/00001/00001/01110',
+    'Ö': '01010/00000/01110/10001/10001/10001/01110', 'Ä': '01010/01110/10001/11111/10001/10001/10001',
+    'Ü': '01010/00000/10001/10001/10001/10001/01110', '€': '00111/01000/11110/01000/11110/01000/00111',
+    '!': '00100/00100/00100/00100/00100/00000/00100', '?': '01110/10001/00001/00010/00100/00000/00100',
+    '.': '00000/00000/00000/00000/00000/00110/00110', ',': '00000/00000/00000/00000/00110/00100/01000',
+    ':': '00000/00110/00110/00000/00110/00110/00000',
+    '/': '00001/00001/00010/00100/01000/10000/10000', '-': '00000/00000/00000/11111/00000/00000/00000',
+    '+': '00000/00100/00100/11111/00100/00100/00000', '=': '00000/00000/11111/00000/11111/00000/00000',
+    '(': '00010/00100/01000/01000/01000/00100/00010', ')': '01000/00100/00010/00010/00010/00100/01000',
+    '#': '01010/11111/01010/01010/11111/01010/00000', '×': '00000/10001/01010/00100/01010/10001/00000',
+    '→': '00000/00100/00010/11111/00010/00100/00000', ' ': '00000/00000/00000/00000/00000/00000/00000',
+  };
+  for (const letter of Object.keys(font)) font[letter] = font[letter].split('/');
+  const icons = {
+    bottle: ['...WW...', '...GG...', '...GG...', '..GGGG..', '..GGGG..', '..WWWW..', '..GGGG..', '..GGGG..'],
+    doener: ['..AAAA..', '.AAAAAA.', 'AAAAAAAA', '.GGGGGG.', '.AAAAAA.', '..AAAA..', '..AAAA..', '...AA...'],
+    clock: ['..WWWW..', '.W....W.', 'W..W...W', 'W..W...W', 'W..WWW.W', 'W......W', '.W....W.', '..WWWW..'],
+    left: ['...W...', '..WW...', '.WWWWWW', 'WWWWWWW', '.WWWWWW', '..WW...', '...W...'],
+    right: ['...W...', '...WW..', 'WWWWWW.', 'WWWWWWW', 'WWWWWW.', '...WW..', '...W...'],
+    up: ['...W...', '..WWW..', '.WWWWW.', 'WWWWWWW', '..WWW..', '..WWW..', '..WWW..'],
+    down: ['..WWW..', '..WWW..', '..WWW..', 'WWWWWWW', '.WWWWW.', '..WWW..', '...W...'],
+  };
+
+  function bitmap(context, rows, x, y, scale, color) {
+    for (let row = 0; row < rows.length; row++) {
+      for (let column = 0; column < rows[row].length; column++) {
+        const cell = rows[row][column];
+        if (cell === '0' || cell === '.') continue;
+        context.fillStyle = color || ({ W: ui.white, G: ui.green, A: ui.amber })[cell];
+        context.fillRect(x + column * scale, y + row * scale, scale, scale);
+      }
+    }
+  }
+
+  function bitmapText(context, text, x, y, scale, color, align = 'left') {
+    const letters = String(text).toUpperCase();
+    if (align === 'center') x -= (letters.length * 6 - 1) * scale / 2;
+    if (align === 'right') x -= (letters.length * 6 - 1) * scale;
+    x = Math.round(x); y = Math.round(y);
+    for (const letter of letters) {
+      bitmap(context, font[letter] || font['?'], x, y, scale, color);
+      x += 6 * scale;
+    }
+  }
+
+  // HUD rectangles are written in backing-buffer pixels, including on Retina displays.
+  function pixelText(text, x, y, scale = 2, color = ui.white, align = 'left') {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    bitmapText(ctx, text, Math.round(x * viewport.pixelRatio), Math.round(y * viewport.pixelRatio),
+      Math.max(1, Math.round(scale * viewport.pixelRatio)), color, align);
+    ctx.restore();
+  }
+
+  function pixelIcon(name, x, y, scale) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    bitmap(ctx, icons[name], Math.round(x * viewport.pixelRatio), Math.round(y * viewport.pixelRatio),
+      Math.max(1, Math.round(scale * viewport.pixelRatio)));
+    ctx.restore();
+  }
+
+  function pixelPanel(x, y, width, height) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const ratio = viewport.pixelRatio;
+    x = Math.round(x * ratio); y = Math.round(y * ratio);
+    width = Math.round(width * ratio); height = Math.round(height * ratio);
+    const border = Math.max(1, Math.round(3 * ratio));
+    ctx.fillStyle = ui.white; ctx.fillRect(x, y, width, height);
+    ctx.fillStyle = ui.shade; ctx.fillRect(x + border, y + border, width - border, height - border);
+    ctx.fillStyle = ui.ink; ctx.fillRect(x + border, y + border, width - border * 2, height - border * 2);
+    ctx.restore();
+  }
+
+  function drawPixelHud(time) {
+    const width = viewport.width, height = viewport.height;
+    const scale = Math.max(1, Math.min(3, Math.floor((width - 24) / 140), Math.floor((height - 24) / 140)));
+    const center = Math.floor(width / 2);
+    if (caught || finishPhase === 'results' || finishPhase === 'exchange') {
+      const panelWidth = Math.min(width - 16, 246 * scale);
+      const panelHeight = Math.min(height - 16, (finishPhase === 'exchange' ? 184 : 142) * scale);
+      const x = Math.floor((width - panelWidth) / 2), y = Math.floor((height - panelHeight) / 2);
+      ctx.fillStyle = ui.ink; ctx.fillRect(0, 0, width, height);
+      pixelPanel(x, y, panelWidth, panelHeight);
+      const line = 13 * scale;
+      let row = y + 12 * scale;
+      if (caught) {
+        pixelText('CAUGHT!', center, row, scale * 2, ui.pink, 'center');
+        pixelText('KONTROLLEUR WINS', center, row + line * 2, scale, ui.white, 'center');
+      } else {
+        const result = finishResults;
+        const exchange = finishPhase === 'exchange';
+        const view = exchange ? exchangePresentation() : null;
+        pixelText(exchange ? 'PFAND → DÖNER' : 'DÖNERLADEN', center, row, scale, ui.amber, 'center');
+        row += line * 1.5;
+        if (exchange) {
+          const art = document.querySelector('#exchange-art');
+          const artWidth = Math.min(panelWidth - 24, 180 * scale);
+          const artHeight = artWidth * art.height / art.width;
+          drawExchange({ x: center - artWidth / 2, y: row, scale: artWidth / art.width });
+          row += artHeight + 6 * scale;
+          pixelText(document.querySelector('#exchange-bottles').textContent.replace('Bottles collected: ', 'BOTTLES '), center, row, scale, ui.green, 'center');
+          row += line;
+          pixelText(formatEuros(view.cents), center, row, scale * 2, ui.amber, 'center');
+          row += line * 2;
+          pixelText('ANY KEY EXCEPT R SKIPS', center, row, scale, ui.white, 'center');
+        } else {
+          const resultWidth = 24 * scale + (String(result.doener).length * 6 - 1) * scale * 3;
+          const resultX = Math.round(center - resultWidth / 2);
+          pixelIcon('doener', resultX, row, scale * 2);
+          pixelText(result.doener, resultX + 24 * scale, row, scale * 3, ui.amber);
+          row += line * 2;
+          pixelText(`${result.bottles} BOTTLES`, center, row, scale, ui.green, 'center');
+          pixelText(`PFAND ${formatEuros(result.totalCents)}`, center, row + line, scale, ui.white, 'center');
+          pixelText(`LEFT ${formatEuros(result.leftoverCents)}`, center, row + line * 2, scale, ui.white, 'center');
+          if (!result.bottles) pixelText('NO BOTTLES, NO DÖNER.', center, row + line * 3, scale, ui.pink, 'center');
+        }
+      }
+      if (finishPhase !== 'exchange' && (reducedMotion.matches || Math.floor(time / 500) % 2 === 0)) {
+        pixelText('PRESS R', center, y + panelHeight - 18 * scale, scale, ui.white, 'center');
+      }
+      return;
+    }
+    const panelWidth = Math.min(width - 16, 220 * scale), x = Math.floor((width - panelWidth) / 2);
+    const barY = 8, barHeight = 16 * scale + 14;
+    pixelPanel(x, barY, panelWidth, barHeight);
+    const itemY = barY + 8;
+    pixelIcon('bottle', x + 10, itemY, scale);
+    pixelText(`× ${String(pfand).padStart(2, '0')}`, x + 10 + 11 * scale, itemY + scale, scale, ui.green);
+    pixelIcon('doener', x + Math.floor(panelWidth * 0.39), itemY, scale);
+    pixelText(pfandResult(pfand).doener, x + Math.floor(panelWidth * 0.39) + 11 * scale, itemY + scale, scale, ui.amber);
+    pixelIcon('clock', x + panelWidth - 56 * scale, itemY, scale);
+    pixelText(`TIME ${String(Math.ceil(Math.max(0, config.runDurationSeconds - elapsed))).padStart(2, '0')}`,
+      x + panelWidth - 45 * scale, itemY + scale, scale);
+    let nextY = barY + barHeight + 8;
+    if (firstCrashAt !== null && !finished) {
+      pixelPanel(x, nextY, panelWidth, 25 * scale + 12);
+      pixelText('KONTROLLEUR!', center, nextY + 7, scale, ui.pink, 'center');
+      const segmentWidth = Math.floor((panelWidth - 24) / 16);
+      const filled = Math.ceil(distanceMeter.value * 16 / 100);
+      for (let i = 0; i < 16; i++) {
+        ctx.fillStyle = i < filled ? ui.lime : ui.shade;
+        ctx.fillRect(x + 12 + i * segmentWidth, nextY + 12 * scale, segmentWidth - 2, 5 * scale);
+      }
+      nextY += 25 * scale + 20;
+    }
+    if (debugHitboxes) {
+      pixelText(`CRASHES ${crashes}`, width - 12, nextY, scale, ui.red, 'right');
+      nextY += 12 * scale;
+    }
+    if (elapsed < 5 && !finished) {
+      pixelPanel(x, nextY, panelWidth, 32 * scale + 12);
+      pixelText('PFAND RUN', center, nextY + 8, scale * 2, ui.amber, 'center');
+      pixelText('BOTTLES → DÖNER', center, nextY + 23 * scale, scale, ui.white, 'center');
+      const hintY = height - 30 * scale - 24;
+      pixelPanel(x, hintY, panelWidth, 30 * scale + 12);
+      pixelIcon('left', x + 12, hintY + 8, scale);
+      pixelIcon('right', x + 12 + 9 * scale, hintY + 8, scale);
+      pixelText('MOVE', x + 12 + 20 * scale, hintY + 8, scale);
+      pixelIcon('up', x + 12, hintY + 10 + 11 * scale, scale);
+      pixelText('JUMP', x + 12 + 9 * scale, hintY + 10 + 11 * scale, scale);
+      pixelIcon('down', center + 3 * scale, hintY + 10 + 11 * scale, scale);
+      pixelText('CROUCH', center + 12 * scale, hintY + 10 + 11 * scale, scale);
+    }
+    if (tollMessageRemaining > 0) {
+      const text = `SPÄTI -${config.spaetiCost} BOTTLES`;
+      pixelPanel(x, height - 24 * scale - 20, panelWidth, 18 * scale + 12);
+      pixelText(text, center, height - 24 * scale - 10, scale, ui.pink, 'center');
+    }
   }
 
   // Rendering only: shared depth for the road, upright artwork, and ground boxes.
@@ -401,6 +604,42 @@
       scale,
       roadScale,
       horizonY,
+    };
+  }
+
+  const snapPixel = value => Math.round(value * viewport.pixelRatio) / viewport.pixelRatio;
+  let objectFrame = null;
+  const frontCanvas = document.createElement('canvas');
+  frontCanvas.width = frontCanvas.height = 100;
+  const frontContext = frontCanvas.getContext('2d');
+  frontContext.imageSmoothingEnabled = false;
+
+  function withObjectFrame(bounds, paint) {
+    const previous = objectFrame;
+    // One continuous depth per object, shared by every face, post and texture.
+    const point = project(bounds.x, bounds.y);
+    const cameraDepth = (config.playerY - config.spawnY) * config.camera.minimumScale /
+      (1 - config.camera.minimumScale);
+    const perspective = point.scale / (viewport.height / (config.playerSize * 4));
+    objectFrame = {
+      worldX: bounds.x, worldY: bounds.y, x: point.x, y: point.y,
+      roadScale: point.roadScale, scale: point.scale,
+      depthScale: (point.y - point.horizonY) * perspective / cameraDepth,
+      sideScale: (point.x - viewport.width / 2) * perspective / cameraDepth,
+    };
+    try { paint(); } finally { objectFrame = previous; }
+  }
+
+  function artworkPoint(x, y, height = 0) {
+    const frame = objectFrame;
+    if (!frame) {
+      const point = project(x, y);
+      return { ...point, x: snapPixel(point.x), y: snapPixel(point.y - height * point.scale) };
+    }
+    return {
+      x: snapPixel(frame.x + (x - frame.worldX) * frame.roadScale + (y - frame.worldY) * frame.sideScale),
+      y: snapPixel(frame.y + (y - frame.worldY) * frame.depthScale - height * frame.scale),
+      roadScale: frame.roadScale, scale: frame.scale,
     };
   }
 
@@ -649,11 +888,10 @@
       sway: Math.sin(phase) * (inspector ? 0.7 : 1.1) * strength };
   }
 
-  // All volume vertices use the same projection as the H ground footprints.
+  // Artwork shares one depth frame; H footprints keep the exact ground projection.
   function volumePoint(bounds, u, v, height) {
-    const point = project(bounds.x + (u - 0.5) * bounds.width,
-      bounds.y + (v - 0.5) * bounds.height);
-    return { x: point.x, y: point.y - height * point.scale };
+    return artworkPoint(bounds.x + (u - 0.5) * bounds.width,
+      bounds.y + (v - 0.5) * bounds.height, height);
   }
 
   function facePath(context, points) {
@@ -680,9 +918,9 @@
     }
     if (glow) {
       ctx.strokeStyle = glow;
-      ctx.lineWidth = Math.max(0.7, viewport.height / config.worldHeight);
+      ctx.lineWidth = Math.max(1, Math.round(viewport.height / config.worldHeight)) * 2 / viewport.pixelRatio;
       ctx.shadowColor = glow;
-      ctx.shadowBlur = 4 * viewport.pixelRatio;
+      ctx.shadowBlur = 0;
       ctx.stroke();
     }
     ctx.restore();
@@ -692,7 +930,7 @@
     ctx.save();
     ctx.fillStyle = config.colors.playerShadow;
     ctx.shadowColor = config.colors.playerShadow;
-    ctx.shadowBlur = 10 * viewport.pixelRatio;
+    ctx.shadowBlur = 0;
     rectanglePath(bounds);
     ctx.fill();
     ctx.restore();
@@ -708,11 +946,15 @@
       facePath(ctx, profile.map(([u, z]) => volumePoint(bounds, u, 1, z)));
       ctx.clip();
     }
-    ctx.translate(left.x, left.y);
-    ctx.scale((right.x - left.x) / 100, (foot.y - left.y) / 100);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    paint(ctx);
+    // Fixed-resolution artwork avoids continuously rerasterizing scaled font outlines.
+    frontContext.save();
+    frontContext.clearRect(0, 0, 100, 100);
+    frontContext.lineCap = 'round';
+    frontContext.lineJoin = 'round';
+    paint(frontContext);
+    frontContext.restore();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(frontCanvas, left.x, left.y, right.x - left.x, foot.y - left.y);
     ctx.restore();
   }
 
@@ -739,7 +981,7 @@
 
   // Fit human proportions in screen space without changing the ground footprint.
   function drawArtwork(bounds, paint, lift = 0, heightScale = 1, gait = runningPose()) {
-    const front = project(bounds.x, bounds.y + bounds.height / 2);
+    const front = artworkPoint(bounds.x, bounds.y + bounds.height / 2);
     const height = (bounds.artHeight || bounds.height) * heightScale * 0.88;
     const accent = bounds.accent || config.colors.player;
     const desiredWidth = height * front.scale * 0.55 / front.roadScale;
@@ -766,7 +1008,7 @@
   function neon(context, color, blur = 6) {
     context.strokeStyle = color;
     context.shadowColor = color;
-    context.shadowBlur = blur;
+    context.shadowBlur = 0;
   }
 
   function strokeLine(context, points, color, width) {
@@ -800,10 +1042,7 @@
         context.lineWidth = 2;
         context.strokeRect(3, 3, 94, 94);
         context.fillStyle = config.colors.signText;
-        context.font = '900 84px system-ui';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText('U', 50, 52);
+        bitmapText(context, 'U', 50, 15, 10, ui.white, 'center');
         context.shadowBlur = 0;
         const opacity = context.globalAlpha;
         context.globalAlpha = opacity * 0.24;
@@ -864,7 +1103,7 @@
     const stemBottom = wheelSize * 0.7;
     // Measure after projection so the proportion holds at every viewport size.
     const stemTop = stemBottom + deckPixels * 0.75 /
-      project(stem.x, stem.y + stem.height / 2).scale;
+      artworkPoint(stem.x, stem.y + stem.height / 2).scale;
     drawVolume(stem, stemBottom, stemTop, config.colors.signText, null, config.colors.scooter);
     drawGroundBeam(bounds, [0.72, 0.85], [0.97, 0.85], thickness,
       stemTop - thickness * 0.5, stemTop + thickness * 0.5);
@@ -879,8 +1118,7 @@
     context.fillStyle = glow;
     context.textAlign = 'center';
     context.textBaseline = 'middle';
-    context.font = `800 ${label === 'SPÄTI' ? 21 : 13}px system-ui`;
-    context.fillText(label, 50, 17);
+    bitmapText(context, label, 50, 7, 3, glow, 'center');
     context.shadowBlur = 0;
     context.fillStyle = config.colors.road;
     context.fillRect(7, 34, 49, 59);
@@ -919,40 +1157,42 @@
       ? { x: laneX(obstacle.lane), y: renderY - config.spaetiHeight / 2,
         width: config.obstacleWidth, height: config.spaetiHeight }
       : obstacleDrawBounds({ ...obstacle, y: renderY });
-    ctx.save();
-    if (impact) ctx.globalAlpha *= impact.opacity;
-    drawGroundShadow(bounds);
-    if (obstacle.definition.type === 'sign') drawSign(bounds);
-    else if (obstacle.definition.type === 'scooter') drawScooter(bounds);
-    else drawVolume(bounds, 0, config.spaetiHeight, config.colors.spaetiShop,
-      context => drawStorefront(context, 'SPÄTI', config.colors.neonMagenta), config.colors.neonMagenta);
-    ctx.restore();
+    withObjectFrame(bounds, () => {
+      ctx.save();
+      if (impact) ctx.globalAlpha *= impact.opacity;
+      drawGroundShadow(bounds);
+      if (obstacle.definition.type === 'sign') drawSign(bounds);
+      else if (obstacle.definition.type === 'scooter') drawScooter(bounds);
+      else drawVolume(bounds, 0, config.spaetiHeight, config.colors.spaetiShop,
+        context => drawStorefront(context, 'SPÄTI', config.colors.neonMagenta), config.colors.neonMagenta);
+      ctx.restore();
+    });
   }
 
   function drawBottle(bottle) {
     const bounds = { x: laneX(bottle.lane), y: bottle.y - config.bottleSize / 2,
       width: config.bottleSize, height: config.bottleSize };
-    const height = config.bottleSize;
-    drawGroundShadow(bounds);
-    const profile = [[0, 0], [1, 0], [1, height * 0.58], [0.7, height * 0.77],
-      [0.7, height], [0.3, height], [0.3, height * 0.77], [0, height * 0.58]];
-    drawProfile(bounds, profile, config.colors.bottle, context => {
-      context.globalAlpha = 0.35;
-      context.fillStyle = config.colors.uniform;
-      context.fillRect(65, 0, 35, 100);
-      context.globalAlpha = 1;
-      context.fillStyle = config.colors.uniform;
-      context.fillRect(0, 58, 100, 22);
-      context.fillStyle = config.colors.signText;
-      context.font = '800 18px system-ui';
-      context.textAlign = 'center'; context.textBaseline = 'middle';
-      context.fillText('↻', 50, 69);
-      neon(context, config.colors.signText, 3);
-      strokeLine(context, [[35, 12], [35, 24], [18, 43], [18, 52]], config.colors.signText, 5);
-      strokeLine(context, [[18, 85], [18, 93]], config.colors.signText, 4);
+    withObjectFrame(bounds, () => {
+      const height = config.bottleSize;
+      drawGroundShadow(bounds);
+      const profile = [[0, 0], [1, 0], [1, height * 0.58], [0.7, height * 0.77],
+        [0.7, height], [0.3, height], [0.3, height * 0.77], [0, height * 0.58]];
+      drawProfile(bounds, profile, config.colors.bottle, context => {
+        context.globalAlpha = 0.35;
+        context.fillStyle = config.colors.uniform;
+        context.fillRect(65, 0, 35, 100);
+        context.globalAlpha = 1;
+        context.fillStyle = config.colors.uniform;
+        context.fillRect(0, 58, 100, 22);
+        context.fillStyle = config.colors.signText;
+        bitmapText(context, 'P', 50, 61, 2, ui.white, 'center');
+        neon(context, config.colors.signText, 3);
+        strokeLine(context, [[35, 12], [35, 24], [18, 43], [18, 52]], config.colors.signText, 5);
+        strokeLine(context, [[18, 85], [18, 93]], config.colors.signText, 4);
+      });
+      drawVolume({ ...bounds, width: bounds.width * 0.44 }, height * 0.94, height,
+        config.colors.uniform, null, config.colors.bottle);
     });
-    drawVolume({ ...bounds, width: bounds.width * 0.44 }, height * 0.94, height,
-      config.colors.uniform, null, config.colors.bottle);
   }
 
   function drawPerson(context, inspector = false, aspect = 0.55, pose = {}) {
@@ -1044,23 +1284,26 @@
     const jumpProgress = player.action === 'jump'
       ? 1 - player.actionRemaining / config.jumpDuration : 0;
     const lift = Math.sin(jumpProgress * Math.PI) * config.jumpHeight;
-    const anchor = project(bounds.x, bounds.y + bounds.height / 2);
-    ctx.save();
-    // Grounded sidestep: lean around the feet, with no added jump or vertical arc.
-    ctx.translate(anchor.x, anchor.y);
-    ctx.transform(1 + pose.recoil * 0.03, 0, -pose.lean, 1 - pose.recoil * 0.18, 0, 0);
-    ctx.translate(-anchor.x, -anchor.y);
-    drawArtwork({ ...bounds, artHeight: config.playerSize, crouch: pose.crouch },
-      (context, aspect) => drawPerson(context, false, aspect, pose), lift);
-    ctx.restore();
+    withObjectFrame({ ...bounds, artHeight: config.playerSize }, () => {
+      const anchor = artworkPoint(bounds.x, bounds.y + bounds.height / 2);
+      ctx.save();
+      // Grounded sidestep: lean around the feet, with no added jump or vertical arc.
+      ctx.translate(anchor.x, anchor.y);
+      ctx.transform(1 + pose.recoil * 0.03, 0, -pose.lean, 1 - pose.recoil * 0.18, 0, 0);
+      ctx.translate(-anchor.x, -anchor.y);
+      drawArtwork({ ...bounds, artHeight: config.playerSize, crouch: pose.crouch },
+        (context, aspect) => drawPerson(context, false, aspect, pose), lift);
+      ctx.restore();
+    });
   }
 
   function drawKontrolleur() {
-    drawArtwork({ x: characterPose().x,
+    const bounds = { x: characterPose().x,
       y: config.playerY + kontrolleurDistance() - config.kontrolleurSize / 2,
       width: config.kontrolleurSize, height: config.kontrolleurSize,
-      accent: config.colors.kontrolleurBlue }, (context, aspect) => drawPerson(context, true, aspect),
-    0, 1, runningPose(true));
+      accent: config.colors.kontrolleurBlue };
+    withObjectFrame(bounds, () => drawArtwork(bounds,
+      (context, aspect) => drawPerson(context, true, aspect), 0, 1, runningPose(true)));
   }
 
   function drawImpactContact() {
@@ -1105,7 +1348,7 @@
     const time = elapsed + finishElapsed;
     const turn = reducedMotion.matches ? 0 : time * Math.PI;
     context.shadowColor = config.colors.neonAmber;
-    context.shadowBlur = 8;
+    context.shadowBlur = 0;
     strokeLine(context, [[27, 40], [27, 94]], config.colors.signText, 1);
     context.fillStyle = config.colors.neonAmber;
     context.beginPath();
@@ -1136,11 +1379,13 @@
   function drawFinishApproach() {
     const shop = finishShopRect();
     if (!shop) return;
-    ctx.save();
-    ctx.translate(shop.x, shop.y);
-    ctx.scale(shop.width / 100, shop.height / 100);
-    paintDoenerladen(ctx);
-    ctx.restore();
+    frontContext.clearRect(0, 0, 100, 100);
+    frontContext.save();
+    paintDoenerladen(frontContext);
+    frontContext.restore();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(frontCanvas, snapPixel(shop.x), snapPixel(shop.y),
+      snapPixel(shop.width), snapPixel(shop.height));
   }
 
   function drawDoenerladen() {
@@ -1167,51 +1412,29 @@
     };
   }
 
-  function paintExchangeBottle(context, x, y, size) {
-    context.fillStyle = config.colors.bottle;
-    context.fillRect(x - size * 0.18, y - size * 0.5, size * 0.36, size * 0.3);
-    context.fillRect(x - size * 0.3, y - size * 0.2, size * 0.6, size * 0.7);
-    context.fillStyle = config.colors.signText;
-    context.fillRect(x - size * 0.25, y + size * 0.1, size * 0.5, size * 0.15);
-  }
-
-  function paintExchangeDoener(context, x, y, size) {
-    context.fillStyle = config.colors.neonAmber;
-    context.beginPath();
-    context.moveTo(x - size / 2, y - size / 3);
-    context.quadraticCurveTo(x, y - size, x + size / 2, y - size / 3);
-    context.lineTo(x + size / 4, y + size / 2);
-    context.lineTo(x - size / 4, y + size / 2);
-    context.closePath(); context.fill();
-    strokeLine(context, [[x - size * 0.35, y - size * 0.18],
-      [x + size * 0.35, y - size * 0.18]], config.colors.bottle, size * 0.14);
-    strokeLine(context, [[x - size * 0.3, y], [x + size * 0.3, y]],
-      config.colors.spaetiShop, size * 0.14);
-  }
-
-  function drawExchange() {
+  function drawExchange(screen) {
     const result = finishResults;
     const view = exchangePresentation();
-    const destination = document.querySelector('#exchange-art');
-    const context = destination.getContext('2d');
-    context.clearRect(0, 0, destination.width, destination.height);
-    context.save();
-    context.textAlign = 'center';
-    context.font = '16px system-ui';
+    const icon = (name, x, y, size) => {
+      const scale = Math.max(1, Math.round(size * screen.scale / 8));
+      pixelIcon(name, screen.x + x * screen.scale - scale * 4,
+        screen.y + y * screen.scale - scale * 4, scale);
+    };
+    const label = (text, x, y, color = ui.white) => pixelText(text,
+      screen.x + x * screen.scale, screen.y + y * screen.scale,
+      Math.max(1, Math.round(2 * screen.scale)), color, 'center');
+    ctx.save();
     // Each token represents an exact, disjoint range of bottles. Work stays bounded.
     const tokens = Math.min(60, result.bottles);
-    context.globalAlpha = 1 - view.grouped;
+    ctx.globalAlpha = 1 - view.grouped;
     for (let i = 0; i < tokens; i++) {
       const first = Math.floor(i * result.bottles / tokens);
       const last = Math.floor((i + 1) * result.bottles / tokens);
       const count = Math.max(0, Math.min(last, view.revealed) - first);
       if (!count) continue;
       const x = 24 + i % 15 * 48, y = 30 + Math.floor(i / 15) * 70;
-      paintExchangeBottle(context, x, y, 30);
-      if (last - first > 1) {
-        context.fillStyle = config.colors.signText;
-        context.fillText(`×${count}`, x, y + 34);
-      }
+      icon('bottle', x, y, 30);
+      if (last - first > 1) label(`×${count}`, x, y + 28);
     }
     const cards = Math.min(4, result.doener);
     const slots = cards + (result.leftoverBottles > 0 ? 1 : 0);
@@ -1226,25 +1449,24 @@
       const x = (i + 0.5) * 720 / slots;
       const bottlesInGroup = leftover ? result.leftoverBottles :
         result.exchangedBottles / result.doener;
-      context.globalAlpha = view.grouped * (1 - converted);
+      ctx.globalAlpha = view.grouped * (1 - converted);
       for (let b = 0; b < bottlesInGroup; b++) {
-        paintExchangeBottle(context, x - 40 + b % 5 * 20, 75 + Math.floor(b / 5) * 38, 24);
+        icon('bottle', x - 40 + b % 5 * 20, 75 + Math.floor(b / 5) * 38, 24);
       }
-      context.globalAlpha = view.grouped * converted;
-      paintExchangeDoener(context, x, 112, reducedMotion.matches ? 70 : 70 * (0.95 + 0.05 * converted));
-      context.globalAlpha = view.grouped;
-      context.fillStyle = config.colors.signText;
-      context.fillText(leftover ? `${result.leftoverBottles} left over` : `${bottlesInGroup} bottles × ${count}`, x, 215);
-      if (!leftover) context.fillText(`→ ${count} Döner`, x, 242);
+      ctx.globalAlpha = view.grouped * converted;
+      icon('doener', x, 112, reducedMotion.matches ? 70 : 70 * (0.95 + 0.05 * converted));
+      ctx.globalAlpha = view.grouped;
+      label(leftover ? `${result.leftoverBottles} LEFT` : `${bottlesInGroup} × ${count}`, x, 215);
+      if (!leftover) label(`→ ${count} DÖNER`, x, 242, ui.amber);
     }
-    context.restore();
+    ctx.restore();
     document.querySelector('#exchange-bottles').textContent = `Bottles collected: ${view.revealed} / ${result.bottles}`;
     document.querySelector('#exchange-total').textContent = `Total Pfand: ${formatEuros(view.cents)}`;
     document.querySelector('#exchange-doener').textContent = `Döner bought: ${shownDoener} / ${result.doener}`;
     document.querySelector('#exchange-leftover').textContent = `Left over: ${formatEuros(result.leftoverCents)}`;
   }
 
-  function draw() {
+  function draw(time = 0) {
     // Moving between displays can change DPR without changing the window size.
     if (viewport.pixelRatio !== (window.devicePixelRatio || 1)) resizeCanvas();
     ctx.setTransform(viewport.pixelRatio, 0, 0, viewport.pixelRatio, 0, 0);
@@ -1281,8 +1503,8 @@
       ctx.restore();
     }
     if (debugHitboxes) drawHitboxes();
-    if (finishPhase === 'exchange') drawExchange();
     if (finishPhase === 'results') drawDoenerladen();
+    drawPixelHud(time);
   }
 
   function drawHitboxes() {
@@ -1306,10 +1528,7 @@
     ctx.fillStyle = config.colors.debugBackground;
     ctx.fillRect(viewport.width - 120, viewport.height * 0.4 - 24, 112, 24);
     ctx.fillStyle = config.colors.debugText;
-    ctx.font = '12px system-ui';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`Overlap: ${overlapping ? 'yes' : 'no'}`, viewport.width - 114, viewport.height * 0.4 - 12);
+    pixelText(`OVERLAP ${overlapping ? 'YES' : 'NO'}`, viewport.width - 114, viewport.height * 0.4 - 17, 1, ui.white);
     ctx.restore();
   }
 
@@ -1317,7 +1536,7 @@
     if (!document.hidden) {
       const dt = previousTime === null ? 0 : Math.min((time - previousTime) / 1000, config.maxFrameSeconds);
       update(dt);
-      draw();
+      draw(time);
       previousTime = time;
     }
     requestAnimationFrame(frame);
