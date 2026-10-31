@@ -10,16 +10,18 @@
   </head>
   <body>
     <main>
-      <header>
-        <div><p class="eyebrow">BERLIN · STEP 4</p><h1>Pfand Run</h1></div>
-        <p class="counter">Crashes <strong id="crashes" aria-live="polite">0</strong></p>
-      </header>
-      <p id="pfand" class="pfand" aria-live="polite">Pfand: 0 🍾</p>
-      <p class="pfand">Time left: <span id="countdown" role="timer"></span></p>
-      <div class="pursuit">
-        <span id="pursuit-label">Kontrolleur out of view</span>
-        <meter id="distance" min="0" max="100" value="100" aria-label="Distance from Kontrolleur" hidden></meter>
-      </div>
+      <section class="hud" aria-label="Run status">
+        <header>
+          <div><p class="eyebrow">BERLIN · STEP 4</p><h1>Pfand Run</h1></div>
+          <p class="counter">Crashes <strong id="crashes" aria-live="polite">0</strong></p>
+        </header>
+        <p id="pfand" class="pfand" aria-live="polite">Pfand: 0 🍾</p>
+        <p class="pfand">Time left: <span id="countdown" role="timer"></span></p>
+        <div class="pursuit">
+          <span id="pursuit-label">Kontrolleur out of view</span>
+          <meter id="distance" min="0" max="100" value="100" aria-label="Distance from Kontrolleur" hidden></meter>
+        </div>
+      </section>
       <div class="playfield">
         <canvas id="game" aria-label="Three-lane runner. Left and right switch lanes, up jumps, down crouches."></canvas>
         <div id="caught" class="caught" role="alert" hidden>

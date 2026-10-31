@@ -15,8 +15,17 @@
   const countdown = document.querySelector('#countdown');
   document.querySelector('#restart-key').textContent = config.restartKey.toUpperCase();
   document.querySelector('#finish-restart-key').textContent = config.restartKey.toUpperCase();
-  canvas.width = config.worldWidth;
-  canvas.height = config.worldHeight;
+  // CSS pixels are independent of the canvas's high-DPI backing buffer.
+  const viewport = { width: 0, height: 0, pixelRatio: 1 };
+  function resizeCanvas() {
+    viewport.width = window.innerWidth;
+    viewport.height = window.innerHeight;
+    viewport.pixelRatio = window.devicePixelRatio || 1;
+    canvas.width = Math.round(viewport.width * viewport.pixelRatio);
+    canvas.height = Math.round(viewport.height * viewport.pixelRatio);
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
 
   // Mulberry32: the same seed produces the same spawn sequence.
   let seed = config.seed >>> 0;
@@ -330,22 +339,29 @@
     if (elapsed >= config.runDurationSeconds) finish();
   }
 
-  // Rendering only: one reciprocal depth for road, objects, and hitboxes.
+  // Rendering only: shared depth for the road, upright artwork, and ground boxes.
+  // Omitting y intersects a road edge with the bottom of the viewport.
   function project(x, y) {
-    const { horizonY, playerScreenY } = config.camera;
-    const screenDepth = canvas.height - horizonY;
+    const horizonY = viewport.height * (config.camera.horizonY / config.worldHeight + 0.05);
+    const playerScreenY = viewport.height * 0.84;
+    const screenDepth = viewport.height - horizonY;
     const playerDepth = playerScreenY - horizonY;
-    // Map the player's row as before and the world bottom to the canvas bottom.
-    const cameraDepth = (config.worldHeight - config.playerY) * screenDepth /
-      (canvas.height - playerScreenY);
-    const playerScale = canvas.width * 0.8 / (config.roadRight - config.roadLeft) *
-      playerDepth / screenDepth;
-    const depth = cameraDepth + config.playerY - y;
-    const scale = playerScale * cameraDepth / depth;
+    // Preserve a readable spawn scale while bringing the camera closer.
+    const cameraDepth = (config.playerY - config.spawnY) * config.camera.minimumScale /
+      (1 - config.camera.minimumScale);
+    const depth = y === undefined ? cameraDepth * playerDepth / screenDepth
+      : cameraDepth + config.playerY - y;
+    const perspective = cameraDepth / depth;
+    // Ground framing adapts to aspect ratio; upright height uses vertical FOV.
+    const roadScale = viewport.width * 1.12 / (config.roadRight - config.roadLeft) *
+      playerDepth / screenDepth * perspective;
+    const scale = viewport.height / (config.playerSize * 4) * perspective;
     return {
-      x: canvas.width / 2 + (x - config.worldWidth / 2) * scale,
-      y: horizonY + playerDepth * scale / playerScale,
+      x: viewport.width / 2 + (x - config.worldWidth / 2) * roadScale,
+      y: horizonY + playerDepth * perspective,
       scale,
+      roadScale,
+      horizonY,
     };
   }
 
@@ -362,8 +378,8 @@
       width: config.obstacleWidth * scale, height: config.obstacleHeight * scale };
   }
 
-  // Project both longitudinal edges so visual contact matches ground overlap.
-  // Filled primitives and the H overlay deliberately share this exact path.
+  // Project all four real ground-box corners; the sprite stands on its near edge.
+  // This stays independent of the upright artwork's pose and height.
   function rectanglePath(bounds, lift = 0, heightScale = 1) {
     const center = project(bounds.x, bounds.y);
     const bottom = project(bounds.x, bounds.y + bounds.height / 2);
@@ -384,19 +400,19 @@
 
   function drawRoad() {
     ctx.fillStyle = config.colors.sky;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const bottomLeft = project(config.roadLeft, config.worldHeight);
-    const bottomRight = project(config.roadRight, config.worldHeight);
+    ctx.fillRect(0, 0, viewport.width, viewport.height);
+    const bottomLeft = project(config.roadLeft);
+    const bottomRight = project(config.roadRight);
     const sidewalkWidth = laneWidth / 10;
     ctx.fillStyle = config.colors.pavement;
     for (const [edge, outside] of [
       [config.roadLeft, config.roadLeft - sidewalkWidth],
       [config.roadRight, config.roadRight + sidewalkWidth],
     ]) {
-      const inner = project(edge, config.worldHeight);
-      const outer = project(outside, config.worldHeight);
+      const inner = project(edge);
+      const outer = project(outside);
       ctx.beginPath();
-      ctx.moveTo(canvas.width / 2, config.camera.horizonY);
+      ctx.moveTo(viewport.width / 2, bottomLeft.horizonY);
       ctx.lineTo(inner.x, inner.y);
       ctx.lineTo(outer.x, outer.y);
       ctx.closePath();
@@ -404,7 +420,7 @@
     }
     ctx.fillStyle = config.colors.road;
     ctx.beginPath();
-    ctx.moveTo(canvas.width / 2, config.camera.horizonY);
+    ctx.moveTo(viewport.width / 2, bottomLeft.horizonY);
     ctx.lineTo(bottomRight.x, bottomRight.y);
     ctx.lineTo(bottomLeft.x, bottomLeft.y);
     ctx.closePath();
@@ -418,7 +434,7 @@
       const distant = project(x, config.spawnY - period);
       ctx.lineWidth = config.laneLineWidth * distant.scale;
       ctx.beginPath();
-      ctx.moveTo(canvas.width / 2, config.camera.horizonY);
+      ctx.moveTo(viewport.width / 2, bottomLeft.horizonY);
       ctx.lineTo(distant.x, distant.y);
       ctx.stroke();
       for (let y = config.spawnY - period + offset; y < config.worldHeight; y += period) {
@@ -435,25 +451,101 @@
 
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  // Artwork uses a 100 × 100 local frame, clipped to the projected world box.
-  // Jump/crouch affect only artwork; the H overlay keeps its ground footprint.
-  function drawArtwork(bounds, paint, lift = 0, heightScale = 1) {
-    const center = project(bounds.x, bounds.y);
-    const top = project(bounds.x, bounds.y - bounds.height / 2);
-    const bottom = project(bounds.x, bounds.y + bounds.height / 2);
-    const width = bounds.width * center.scale;
-    const height = (bottom.y - top.y) * heightScale;
+  // All volume vertices use the same projection as the H ground footprints.
+  function volumePoint(bounds, u, v, height) {
+    const point = project(bounds.x + (u - 0.5) * bounds.width,
+      bounds.y + (v - 0.5) * bounds.height);
+    return { x: point.x, y: point.y - height * point.scale };
+  }
+
+  function facePath(context, points) {
+    context.beginPath();
+    points.forEach((point, index) => {
+      if (index === 0) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    });
+    context.closePath();
+  }
+
+  // Shade with existing palette colors; no extra color or gameplay settings.
+  function drawFace(points, color, light = 0, glow = color) {
     ctx.save();
+    facePath(ctx, points);
+    ctx.fillStyle = color;
+    ctx.fill();
+    if (light) {
+      ctx.globalAlpha = Math.abs(light);
+      ctx.fillStyle = light > 0 ? config.colors.signText : config.colors.uniform;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = glow;
+    ctx.lineWidth = Math.max(0.7, viewport.height / config.worldHeight);
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = 4 * viewport.pixelRatio;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawGroundShadow(bounds) {
+    ctx.save();
+    ctx.fillStyle = config.colors.playerShadow;
     ctx.shadowColor = config.colors.playerShadow;
-    ctx.shadowBlur = 0;
-    rectanglePath(bounds, lift, heightScale);
-    ctx.clip();
-    ctx.translate(center.x - width / 2, bottom.y - height - lift * center.scale);
-    ctx.scale(width / 100, height / 100);
+    ctx.shadowBlur = 10 * viewport.pixelRatio;
+    rectanglePath(bounds);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // The front texture is attached to the near face, never a free screen offset.
+  function paintFront(bounds, bottom, top, paint, profile) {
+    const left = volumePoint(bounds, 0, 1, top);
+    const right = volumePoint(bounds, 1, 1, top);
+    const foot = volumePoint(bounds, 0, 1, bottom);
+    ctx.save();
+    if (profile) {
+      facePath(ctx, profile.map(([u, z]) => volumePoint(bounds, u, 1, z)));
+      ctx.clip();
+    }
+    ctx.translate(left.x, left.y);
+    ctx.scale((right.x - left.x) / 100, (foot.y - left.y) / 100);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     paint(ctx);
     ctx.restore();
+  }
+
+  // Extrude an x/height silhouette through its exact world ground footprint.
+  // Horizontal upper edges become light top faces; vertical edges become dark sides.
+  function drawProfile(bounds, profile, color, paint, glow = color) {
+    const front = profile.map(([u, z]) => volumePoint(bounds, u, 1, z));
+    const back = profile.map(([u, z]) => volumePoint(bounds, u, 0, z));
+    for (let i = 0; i < profile.length; i++) {
+      const next = (i + 1) % profile.length;
+      const top = profile[next][0] < profile[i][0] && profile[i][1] + profile[next][1] > 0;
+      drawFace([back[i], back[next], front[next], front[i]], color, top ? 0.3 : -0.55, glow);
+    }
+    drawFace(front, color, 0, glow);
+    if (paint) {
+      const heights = profile.map(([, z]) => z);
+      paintFront(bounds, Math.min(...heights), Math.max(...heights), paint, profile);
+    }
+  }
+
+  function drawVolume(bounds, bottom, top, color, paint, glow = color) {
+    drawProfile(bounds, [[0, bottom], [1, bottom], [1, top], [0, top]], color, paint, glow);
+  }
+
+  // Preserve the gait and poses; the jacket and head now have physical depth.
+  function drawArtwork(bounds, paint, lift = 0, heightScale = 1) {
+    const height = (bounds.artHeight || bounds.height) * heightScale;
+    const accent = bounds.accent || config.colors.player;
+    drawGroundShadow(bounds);
+    drawVolume({ ...bounds, width: bounds.width * 0.46 }, lift + height * 0.36,
+      lift + height * 0.73, accent);
+    drawVolume({ ...bounds, width: bounds.width * 0.26 }, lift + height * 0.74,
+      lift + height * 0.99, config.colors.uniform, null, accent);
+    paintFront(bounds, lift, lift + height, paint);
   }
 
   function neon(context, color, blur = 6) {
@@ -480,32 +572,48 @@
     context.fill();
   }
 
-  function drawSign(context) {
-    context.fillStyle = config.colors.sign;
-    context.fillRect(1, 1, 98, 98);
-    neon(context, config.colors.signText);
-    context.lineWidth = 3;
-    context.strokeRect(3, 3, 94, 94);
-    context.fillStyle = config.colors.signText;
-    context.font = '900 86px system-ui';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.fillText('U', 50, 51);
+  function drawSign(bounds) {
+    const postWidth = config.laneLineWidth * 1.5;
+    for (const side of [-1, 1]) {
+      drawVolume({ ...bounds, x: bounds.x + side * (bounds.width - postWidth) / 2,
+        width: postWidth }, 0, config.signPostHeight, config.colors.uniform,
+      null, config.colors.sign);
+    }
+    drawVolume(bounds, config.signPostHeight, config.signPostHeight + config.obstacleHeight,
+      config.colors.sign, context => {
+        neon(context, config.colors.signText);
+        context.lineWidth = 2;
+        context.strokeRect(3, 3, 94, 94);
+        context.fillStyle = config.colors.signText;
+        context.font = '900 84px system-ui';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText('U', 50, 52);
+      });
   }
 
-  function drawScooter(context) {
-    neon(context, config.colors.scooter);
-    for (const x of [16, 84]) {
-      disc(context, x, 78, 16, config.colors.uniform);
-      context.lineWidth = 4;
-      context.stroke();
-      disc(context, x, 78, 5, config.colors.scooter);
+  function drawScooter(bounds) {
+    const wheelSize = bounds.width * 0.17;
+    for (const side of [-1, 1]) {
+      const wheel = { ...bounds, x: bounds.x + side * (bounds.width - wheelSize) / 2,
+        width: wheelSize, height: bounds.height * 0.65,
+        y: bounds.y + bounds.height * 0.175 };
+      const profile = Array.from({ length: 16 }, (_, i) => {
+        const angle = i * Math.PI / 8;
+        return [0.5 + Math.cos(angle) / 2, wheelSize * (0.5 + Math.sin(angle) / 2)];
+      });
+      drawProfile(wheel, profile, config.colors.uniform, context => {
+        disc(context, 50, 50, 15, config.colors.scooter);
+      }, config.colors.scooter);
     }
-    strokeLine(context, [[16, 77], [35, 78], [72, 78], [79, 16]], config.colors.scooter, 9);
-    strokeLine(context, [[67, 12], [93, 12]], config.colors.scooter, 8);
-    strokeLine(context, [[32, 70], [65, 70]], config.colors.signText, 2);
-    context.shadowBlur = 0;
-    strokeLine(context, [[79, 25], [82, 58]], config.colors.scooterText, 2);
+    drawVolume(bounds, wheelSize * 0.55, wheelSize, config.colors.scooter,
+      context => strokeLine(context, [[12, 25], [88, 25]], config.colors.signText, 3));
+    const stemWidth = config.laneLineWidth * 1.5;
+    const stemX = bounds.x + bounds.width * 0.3;
+    drawVolume({ ...bounds, x: stemX, width: stemWidth }, wheelSize,
+      config.obstacleHeight, config.colors.scooter);
+    drawVolume({ ...bounds, x: stemX - bounds.width * 0.075, width: bounds.width * 0.35 },
+      config.obstacleHeight - stemWidth, config.obstacleHeight, config.colors.scooter);
   }
 
   function drawStorefront(context, label, glow) {
@@ -523,7 +631,7 @@
     context.fillStyle = config.colors.road;
     context.fillRect(7, 34, 49, 59);
     context.fillRect(65, 34, 28, 65);
-    context.globalAlpha = 0.18;
+    context.globalAlpha = 0.32;
     context.fillStyle = glow;
     context.fillRect(7, 34, 49, 59);
     context.globalAlpha = 1;
@@ -531,6 +639,8 @@
     context.lineWidth = 1;
     context.strokeRect(7, 34, 49, 59);
     context.strokeRect(65, 34, 28, 65);
+    strokeLine(context, [[12, 39], [29, 39]], config.colors.signText, 2);
+    strokeLine(context, [[46, 38], [22, 85]], glow, 1);
     for (let row = 0; row < 3; row++) {
       strokeLine(context, [[11, 53 + row * 15], [52, 53 + row * 15]], glow, 1);
       for (let column = 0; column < 5; column++) {
@@ -552,35 +662,37 @@
       ? { x: laneX(obstacle.lane), y: obstacle.y - config.spaetiHeight / 2,
         width: config.obstacleWidth, height: config.spaetiHeight }
       : obstacleDrawBounds(obstacle);
-    drawArtwork(bounds, context => {
-      if (obstacle.definition.type === 'sign') drawSign(context);
-      else if (obstacle.definition.type === 'scooter') drawScooter(context);
-      else drawStorefront(context, 'SPÄTI', config.colors.neonMagenta);
-    });
+    drawGroundShadow(bounds);
+    if (obstacle.definition.type === 'sign') drawSign(bounds);
+    else if (obstacle.definition.type === 'scooter') drawScooter(bounds);
+    else drawVolume(bounds, 0, config.spaetiHeight, config.colors.spaetiShop,
+      context => drawStorefront(context, 'SPÄTI', config.colors.neonMagenta), config.colors.neonMagenta);
   }
 
   function drawBottle(bottle) {
-    drawArtwork({ x: laneX(bottle.lane), y: bottle.y - config.bottleSize / 2,
-      width: config.bottleSize, height: config.bottleSize }, context => {
-      neon(context, config.colors.bottle, 5);
-      context.fillStyle = config.colors.bottle;
-      context.beginPath();
-      context.moveTo(38, 4); context.lineTo(62, 4);
-      context.lineTo(62, 29); context.lineTo(77, 43);
-      context.lineTo(77, 96); context.lineTo(23, 96);
-      context.lineTo(23, 43); context.lineTo(38, 29);
-      context.closePath(); context.fill();
-      context.shadowBlur = 0;
+    const bounds = { x: laneX(bottle.lane), y: bottle.y - config.bottleSize / 2,
+      width: config.bottleSize, height: config.bottleSize };
+    const height = config.bottleSize;
+    drawGroundShadow(bounds);
+    const profile = [[0, 0], [1, 0], [1, height * 0.58], [0.7, height * 0.77],
+      [0.7, height], [0.3, height], [0.3, height * 0.77], [0, height * 0.58]];
+    drawProfile(bounds, profile, config.colors.bottle, context => {
+      context.globalAlpha = 0.35;
       context.fillStyle = config.colors.uniform;
-      context.fillRect(36, 2, 28, 9);
-      context.fillRect(25, 58, 50, 22);
-      strokeLine(context, [[33, 48], [33, 53]], config.colors.signText, 5);
-      strokeLine(context, [[33, 84], [33, 90]], config.colors.signText, 4);
+      context.fillRect(65, 0, 35, 100);
+      context.globalAlpha = 1;
+      context.fillStyle = config.colors.uniform;
+      context.fillRect(0, 58, 100, 22);
       context.fillStyle = config.colors.signText;
-      context.font = '800 15px system-ui';
+      context.font = '800 18px system-ui';
       context.textAlign = 'center'; context.textBaseline = 'middle';
       context.fillText('↻', 50, 69);
+      neon(context, config.colors.signText, 3);
+      strokeLine(context, [[35, 12], [35, 24], [18, 43], [18, 52]], config.colors.signText, 5);
+      strokeLine(context, [[18, 85], [18, 93]], config.colors.signText, 4);
     });
+    drawVolume({ ...bounds, width: bounds.width * 0.44 }, height * 0.94, height,
+      config.colors.uniform, null, config.colors.bottle);
   }
 
   function drawPerson(context, inspector = false) {
@@ -623,24 +735,19 @@
   }
 
   function drawPlayer() {
-    const ground = project(laneX(player.lane), config.playerY);
-    ctx.fillStyle = config.colors.playerShadow;
-    ctx.beginPath();
-    ctx.ellipse(ground.x, ground.y, config.shadowWidth * ground.scale,
-      config.shadowHeight * ground.scale, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const bounds = playerDrawBounds();
     const jumpProgress = player.action === 'jump'
       ? 1 - player.actionRemaining / config.jumpDuration : 0;
     const lift = Math.sin(jumpProgress * Math.PI) * config.jumpHeight;
-    drawArtwork(playerDrawBounds(), context => drawPerson(context), lift,
+    drawArtwork({ ...bounds, artHeight: config.playerSize }, context => drawPerson(context), lift,
       player.action === 'crouch' ? config.crouchScale : 1);
   }
 
   function drawKontrolleur() {
     drawArtwork({ x: laneX(player.lane),
       y: config.playerY + kontrolleurDistance() - config.kontrolleurSize / 2,
-      width: config.kontrolleurSize, height: config.kontrolleurSize },
-    context => drawPerson(context, true));
+      width: config.kontrolleurSize, height: config.kontrolleurSize,
+      accent: config.colors.kontrolleur }, context => drawPerson(context, true));
   }
 
   function drawDoenerladen() {
@@ -664,6 +771,9 @@
   }
 
   function draw() {
+    // Moving between displays can change DPR without changing the window size.
+    if (viewport.pixelRatio !== (window.devicePixelRatio || 1)) resizeCanvas();
+    ctx.setTransform(viewport.pixelRatio, 0, 0, viewport.pixelRatio, 0, 0);
     drawRoad();
     // Paint far to near without sorting or modifying simulation arrays.
     const scene = [
@@ -678,7 +788,7 @@
     for (const item of scene) item.draw();
     if (flashRemaining > 0) {
       ctx.fillStyle = config.colors.flash;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, viewport.width, viewport.height);
     }
     if (debugHitboxes) drawHitboxes();
     if (finished) drawDoenerladen();
@@ -703,12 +813,12 @@
       ctx.stroke();
     }
     ctx.fillStyle = config.colors.debugBackground;
-    ctx.fillRect(8, 8, 112, 24);
+    ctx.fillRect(viewport.width - 120, viewport.height * 0.4 - 24, 112, 24);
     ctx.fillStyle = config.colors.debugText;
     ctx.font = '12px system-ui';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`Overlap: ${overlapping ? 'yes' : 'no'}`, 14, 20);
+    ctx.fillText(`Overlap: ${overlapping ? 'yes' : 'no'}`, viewport.width - 114, viewport.height * 0.4 - 12);
     ctx.restore();
   }
 
