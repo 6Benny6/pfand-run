@@ -23,7 +23,7 @@ window.GAME_CONFIG = Object.freeze({
   spaetiWindowInset: 10,
   spaeti: { type: 'spaeti', label: 'SPÄTI', color: '#f5d66f', textColor: '#332818', shopColor: '#644f36' },
   jumpDuration: 0.7,
-  crouchDuration: 0.7,
+  crouchMaxSeconds: 2,
   crashFlashDuration: 0.18,
   crashWindowSeconds: 3,
   restartKey: 'r',

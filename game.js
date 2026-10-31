@@ -39,6 +39,7 @@
   }
 
   const player = { lane: config.startLane, action: 'run', actionRemaining: 0 };
+  let crouchHeld = false;
   let obstacles = [];
   let bottles = [];
   const recentLanes = [];
@@ -68,6 +69,7 @@
 
   function finish() {
     finished = true;
+    releaseCrouch();
     firstCrashAt = null;
     flashRemaining = 0;
     tollMessageRemaining = 0;
@@ -112,6 +114,7 @@
     flashRemaining = config.crashFlashDuration;
     if (firstCrashAt !== null && time - firstCrashAt < config.crashWindowSeconds) {
       caught = true;
+      releaseCrouch();
       caughtScreen.hidden = false;
       status.textContent = 'Caught. Restart to try again.';
     } else {
@@ -121,6 +124,7 @@
   }
 
   function restart() {
+    releaseCrouch();
     seed = config.seed >>> 0;
     player.lane = config.startLane;
     player.action = 'run';
@@ -161,10 +165,27 @@
     const definition = canSpawnSpaeti && random() < config.spaetiSpawnChance
       ? config.spaeti
       : config.obstacles[Math.floor(random() * config.obstacles.length)];
-    obstacles.push({ lane, y: config.spawnY, definition, passed: false });
+    obstacles.push({ lane, y: config.spawnY, definition, passed: false, crashed: false });
     recentLanes.push(lane);
     if (recentLanes.length > config.laneCount - 1) recentLanes.shift();
   }
+
+  function releaseCrouch() {
+    crouchHeld = false;
+    if (player.action !== 'crouch') return;
+    player.action = 'run';
+    player.actionRemaining = 0;
+    if (!caught && !finished && firstCrashAt === null) {
+      status.textContent = 'Dodge obstacles to keep the Kontrolleur away.';
+    }
+  }
+
+  window.addEventListener('keyup', event => {
+    if (event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    releaseCrouch();
+  });
+  window.addEventListener('blur', releaseCrouch);
 
   window.addEventListener('keydown', event => {
     if ((caught || finished) && event.key.toLowerCase() === config.restartKey.toLowerCase()) {
@@ -175,12 +196,26 @@
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     event.preventDefault();
     if (event.repeat || document.hidden || caught || finished) return;
+    if (event.key === 'ArrowDown') {
+      if (crouchHeld) return;
+      crouchHeld = true;
+    }
+    const previousLane = player.lane;
     if (event.key === 'ArrowLeft') player.lane = Math.max(0, player.lane - 1);
     if (event.key === 'ArrowRight') player.lane = Math.min(config.laneCount - 1, player.lane + 1);
+    if (player.lane !== previousLane) {
+      for (const obstacle of obstacles) {
+        if (obstacle.definition.type !== 'spaeti' && !obstacle.crashed &&
+            obstacle.lane === previousLane && obstacle.y > config.playerY - config.playerSize &&
+            obstacle.y < config.playerY + config.obstacleHeight) {
+          obstacle.passed = true; // Leaving during overlap clears this obstacle.
+        }
+      }
+    }
     if (player.action !== 'run') return;
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       player.action = event.key === 'ArrowUp' ? 'jump' : 'crouch';
-      player.actionRemaining = player.action === 'jump' ? config.jumpDuration : config.crouchDuration;
+      player.actionRemaining = player.action === 'jump' ? config.jumpDuration : config.crouchMaxSeconds;
       if (firstCrashAt === null) status.textContent = player.action === 'jump' ? 'Jumping' : 'Crouching';
     }
   });
@@ -217,19 +252,33 @@
     for (const obstacle of obstacles) {
       const previousY = obstacle.y;
       obstacle.y += config.startSpeed * dt;
+      if (obstacle.definition.type !== 'spaeti') {
+        if (obstacle.passed || obstacle.crashed) continue;
+        // Sweep the full frame against the player's fixed ground footprint.
+        const overlapStart = Math.max(0,
+          (config.playerY - config.playerSize - previousY) / config.startSpeed);
+        const overlapEnd = Math.min(dt,
+          (config.playerY + config.obstacleHeight - previousY) / config.startSpeed);
+        if (overlapStart < overlapEnd && obstacle.lane === player.lane) {
+          const correctAction = actionAtStart === obstacle.definition.requiredAction;
+          if (!correctAction || actionTimeAtStart < overlapEnd) {
+            const crashTime = correctAction ? Math.max(overlapStart, actionTimeAtStart) : overlapStart;
+            obstacle.crashed = true;
+            recordCrash(elapsed - dt + crashTime);
+            if (caught) break;
+          }
+        }
+        if (obstacle.y >= config.playerY + config.obstacleHeight) obstacle.passed = true;
+        continue;
+      }
       if (!obstacle.passed && previousY < config.playerY && obstacle.y >= config.playerY) {
         obstacle.passed = true;
-        const crossingTime = (config.playerY - previousY) / config.startSpeed;
-        const action = actionTimeAtStart > crossingTime ? actionAtStart : 'run';
         if (obstacle.lane === player.lane && !caught && !finished) {
           if (obstacle.definition.type === 'spaeti') {
             pfand = Math.max(0, pfand - config.spaetiCost);
             pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
             tollMessage.textContent = `Späti-Preise: -${config.spaetiCost} ${config.bottleEmoji}`;
             tollMessageRemaining = config.spaetiMessageDuration;
-          } else if (action !== obstacle.definition.requiredAction) {
-            recordCrash(elapsed - dt + crossingTime);
-            if (caught) break;
           }
         }
       }
