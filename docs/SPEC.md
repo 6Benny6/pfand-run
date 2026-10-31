@@ -52,6 +52,9 @@ collected.
 The game is seen from behind the runner, with the road narrowing toward
 a vanishing point. Berlin at dusk: dark asphalt, warm lamps, neon signs.
 Everything is drawn in code. Colors live in config.js so they can be tuned.
+The HUD looks like an 8-bit console game: a pixel font, chunky bordered
+panels, pixel icons, a small fixed palette. No development labels in the
+UI. The crash counter is shown only in debug mode (H).
 
 ## What's different
 It applies a common game idea to the context of the wild city that is
