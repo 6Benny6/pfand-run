@@ -619,13 +619,14 @@
   function withObjectFrame(bounds, paint) {
     const previous = objectFrame;
     // One continuous depth per object, shared by every face, post and texture.
-    const point = project(bounds.x, bounds.y);
+    const nearY = bounds.y + bounds.height / 2;
+    const point = project(bounds.x, nearY);
     const cameraDepth = (config.playerY - config.spawnY) * config.camera.minimumScale /
       (1 - config.camera.minimumScale);
-    if (!point || bounds.y + bounds.height / 2 >= config.playerY + cameraDepth) return;
+    if (!point || nearY >= config.playerY + cameraDepth) return;
     const perspective = point.scale / (viewport.height / (config.playerSize * 4));
     objectFrame = {
-      worldX: bounds.x, worldY: bounds.y, x: point.x, y: point.y,
+      worldX: bounds.x, worldY: nearY, x: point.x, y: point.y,
       roadScale: point.roadScale, scale: point.scale,
       depthScale: (point.y - point.horizonY) * perspective / cameraDepth,
       sideScale: (point.x - viewport.width / 2) * perspective / cameraDepth,
@@ -880,7 +881,7 @@
       ctx.closePath();
       ctx.fill();
     }
-    ctx.fillStyle = config.colors.worldRoad;
+    ctx.fillStyle = config.colors.readableRoad;
     ctx.beginPath();
     ctx.moveTo(viewport.width / 2, bottomLeft.horizonY);
     ctx.lineTo(bottomRight.x, bottomRight.y);
@@ -891,7 +892,7 @@
     ctx.clip(); // Surface details remain inside the straight road edges.
     drawRoadTexture();
     ctx.restore();
-    ctx.strokeStyle = config.colors.worldLane;
+    ctx.strokeStyle = config.colors.readableLane;
     // Dashes travel in world space at the unchanged world speed.
     const period = config.dashLength + config.dashGap;
     const offset = elapsed * config.startSpeed % period;
@@ -1035,7 +1036,7 @@
   }
 
   // Shade with existing palette colors; no extra color or gameplay settings.
-  function drawFace(points, color, light = 0, glow = false) {
+  function drawFace(points, color, light = 0, rim = false) {
     if (points.some(point => !point)) return;
     ctx.save();
     const opacity = ctx.globalAlpha;
@@ -1044,15 +1045,18 @@
     ctx.fill();
     if (light) {
       ctx.globalAlpha = opacity * Math.abs(light);
-      ctx.fillStyle = light > 0 ? config.colors.signText : config.colors.uniform;
+      ctx.fillStyle = light > 0 ? config.colors.objectTop : config.colors.objectShade;
       ctx.fill();
       ctx.globalAlpha = opacity;
     }
-    if (glow) {
-      ctx.strokeStyle = glow;
-      ctx.lineWidth = Math.max(1, Math.round(viewport.height / config.worldHeight)) * 2 / viewport.pixelRatio;
-      ctx.shadowColor = glow;
-      ctx.shadowBlur = 4 * viewport.pixelRatio;
+    if (rim) {
+      ctx.strokeStyle = config.colors.objectRim;
+      const pixels = Math.max(1, Math.round(viewport.pixelRatio));
+      ctx.lineWidth = pixels / viewport.pixelRatio;
+      const halfPixel = (pixels % 2) * 0.5 / viewport.pixelRatio;
+      ctx.translate(halfPixel, halfPixel);
+      facePath(ctx, points);
+      ctx.shadowBlur = 0;
       ctx.stroke();
     }
     ctx.restore();
@@ -1099,55 +1103,29 @@
 
   // Extrude an x/height silhouette through its exact world ground footprint.
   // Horizontal upper edges become light top faces; vertical edges become dark sides.
-  function drawProfile(bounds, profile, color, paint, glow = false) {
+  function drawProfile(bounds, profile, color, paint) {
     const front = profile.map(([u, z]) => volumePoint(bounds, u, 1, z));
     const back = profile.map(([u, z]) => volumePoint(bounds, u, 0, z));
     for (let i = 0; i < profile.length; i++) {
       const next = (i + 1) % profile.length;
       const top = profile[next][0] < profile[i][0] && profile[i][1] + profile[next][1] > 0;
-      drawFace([back[i], back[next], front[next], front[i]], color, top ? 0.3 : -0.55, glow);
+      drawFace([back[i], back[next], front[next], front[i]], color, top ? 0.3 : -0.55, top);
     }
-    drawFace(front, color, 0, glow);
+    drawFace(front, color, 0, true);
     if (paint) {
       const heights = profile.map(([, z]) => z);
       paintFront(bounds, Math.min(...heights), Math.max(...heights), paint, profile);
     }
   }
 
-  function drawVolume(bounds, bottom, top, color, paint, glow = false) {
-    drawProfile(bounds, [[0, bottom], [1, bottom], [1, top], [0, top]], color, paint, glow);
+  function drawVolume(bounds, bottom, top, color, paint) {
+    drawProfile(bounds, [[0, bottom], [1, bottom], [1, top], [0, top]], color, paint);
   }
 
-  // Fit human proportions in screen space without changing the ground footprint.
-  function drawArtwork(bounds, paint, lift = 0, heightScale = 1, gait = runningPose()) {
-    const front = artworkPoint(bounds.x, bounds.y + bounds.height / 2);
-    const height = (bounds.artHeight || bounds.height) * heightScale * 0.88;
-    const accent = bounds.accent || config.colors.player;
-    const desiredWidth = height * front.scale * 0.55 / front.roadScale;
-    const figure = { ...bounds, width: Math.min(desiredWidth, bounds.width * 2.6) };
-    const aspect = figure.width * front.roadScale / (height * front.scale);
-    drawGroundShadow(bounds);
-    // Human bodies are shallow; keep their front anchored to the original feet.
-    const body = { ...figure, height: bounds.height * 0.14,
-      x: figure.x + gait.sway * figure.width / 100,
-      y: bounds.y + bounds.height * 0.43 };
-    const bodyLift = lift - height * (gait.bob / 100 + (bounds.crouch ? 0.22 : 0));
-    drawProfile({ ...body, width: figure.width * 0.56 },
-      [[0, bodyLift + height * 0.42], [1, bodyLift + height * 0.42],
-        [1, bodyLift + height * 0.69], [0.83, bodyLift + height * 0.75],
-        [0.17, bodyLift + height * 0.75], [0, bodyLift + height * 0.69]], accent);
-    const head = { ...body, width: height * 0.15 * front.scale / front.roadScale };
-    drawProfile(head, Array.from({ length: 16 }, (_, i) => {
-      const angle = i * Math.PI / 8;
-      return [0.5 + Math.cos(angle) / 2, bodyLift + height * (0.895 + Math.sin(angle) * 0.075)];
-    }), config.colors.uniform, null, false);
-    paintFront(figure, lift, lift + height, context => paint(context, aspect));
-  }
-
-  function neon(context, color, blur = 6) {
+  function signEdge(context, color) {
     context.strokeStyle = color;
     context.shadowColor = color;
-    context.shadowBlur = blur;
+    context.shadowBlur = 0;
   }
 
   function strokeLine(context, points, color, width) {
@@ -1172,12 +1150,11 @@
     const postWidth = config.laneLineWidth * 1.5;
     for (const side of [-1, 1]) {
       drawVolume({ ...bounds, x: bounds.x + side * (bounds.width - postWidth) / 2,
-        width: postWidth }, 0, config.signPostHeight, config.colors.postBlack,
-      null, false);
+        width: postWidth }, 0, config.signPostHeight, config.colors.postBlack);
     }
     drawVolume(bounds, config.signPostHeight, config.signPostHeight + config.obstacleHeight,
       config.colors.sign, context => {
-        neon(context, config.colors.signText);
+        signEdge(context, config.colors.signText);
         context.lineWidth = 2;
         context.strokeRect(3, 3, 94, 94);
         context.shadowBlur = 0;
@@ -1192,7 +1169,7 @@
         context.fillRect(90, 9, 6, 87);
         context.fillRect(4, 90, 86, 6);
         context.globalAlpha = opacity;
-      }, config.colors.signText);
+      });
   }
 
   function drawGroundBeam(bounds, start, end, thickness, bottom, top) {
@@ -1209,7 +1186,7 @@
       const next = (i + 1) % 4;
       drawFace([base[i], base[next], roof[next], roof[i]], config.colors.worldHardware, -0.4);
     }
-    drawFace(roof, config.colors.worldHardware);
+    drawFace(roof, config.colors.worldHardware, 0.3, true);
   }
 
   function drawScooter(bounds) {
@@ -1248,7 +1225,7 @@
   function drawStorefront(context, label, glow) {
     context.fillStyle = config.colors.uniform;
     context.fillRect(0, 0, 100, 100);
-    neon(context, glow);
+    signEdge(context, glow);
     context.lineWidth = 2;
     context.strokeRect(2, 2, 96, 24);
     context.fillStyle = glow;
@@ -1285,14 +1262,16 @@
     }
   }
 
-  function streetOpacity(y) {
-    // Fade only the final half-player-length before the row, then draw nothing.
-    return clamp((config.playerY - y) / (config.playerSize * 0.5));
+  function streetOpacity(bounds) {
+    // Cull the near face at the runner's drawn feet, not the obstacle's logical row.
+    const nearY = bounds.y + bounds.height / 2;
+    const playerBounds = playerDrawBounds();
+    const playerRow = playerBounds.y + playerBounds.height / 2;
+    if (!project(bounds.x, nearY)) return 0;
+    return clamp((playerRow - nearY) / (config.playerSize * 0.5));
   }
 
   function drawObstacle(obstacle) {
-    const opacity = streetOpacity(obstacle.y);
-    if (opacity === 0) return;
     const impact = signImpactVisual(obstacle);
     if (impact?.opacity === 0) return;
     const renderY = impact ? impact.y : obstacle.y;
@@ -1300,6 +1279,8 @@
       ? { x: laneX(obstacle.lane), y: renderY - config.spaetiHeight / 2,
         width: config.obstacleWidth, height: config.spaetiHeight }
       : obstacleDrawBounds({ ...obstacle, y: renderY });
+    const opacity = streetOpacity(bounds);
+    if (opacity === 0) return;
     withObjectFrame(bounds, () => {
       ctx.save();
       ctx.globalAlpha *= opacity;
@@ -1313,113 +1294,118 @@
     });
   }
 
-  function drawBottle(bottle) {
-    const opacity = streetOpacity(bottle.y);
-    if (opacity === 0) return;
-    const bounds = { x: laneX(bottle.lane), y: bottle.y - config.bottleSize / 2,
-      width: config.bottleSize, height: config.bottleSize };
-    withObjectFrame(bounds, () => {
-      ctx.save();
-      ctx.globalAlpha *= opacity;
-      const height = config.bottleSize;
-      drawGroundShadow(bounds);
-      const profile = [[0, 0], [1, 0], [1, height * 0.58], [0.7, height * 0.77],
-        [0.7, height], [0.3, height], [0.3, height * 0.77], [0, height * 0.58]];
-      drawProfile(bounds, profile, config.colors.bottle, context => {
-        context.globalAlpha = 0.35;
-        context.fillStyle = config.colors.uniform;
-        context.fillRect(65, 0, 35, 100);
-        context.globalAlpha = 1;
-        context.fillStyle = config.colors.uniform;
-        context.fillRect(0, 58, 100, 22);
-        context.fillStyle = config.colors.signText;
-        bitmapText(context, 'P', 50, 61, 2, ui.white, 'center');
-        strokeLine(context, [[35, 12], [35, 24], [18, 43], [18, 52]], config.colors.signText, 5);
-        strokeLine(context, [[18, 85], [18, 93]], config.colors.signText, 4);
+  const bottlePalette = {
+    G: config.colors.glass, g: config.colors.glassShade,
+    h: config.colors.glassLight, H: config.colors.glassHighlight,
+    C: config.colors.bottleCap, c: config.colors.bottleCapShade,
+  };
+  const characterPalettes = [false, true].map(inspector => ({
+    h: inspector ? config.colors.uniformShade : config.colors.hoodieShade,
+    H: inspector ? config.colors.uniformLight : config.colors.hoodie,
+    j: inspector ? config.colors.uniformShade : config.colors.jeansShade,
+    J: inspector ? config.colors.uniformLight : config.colors.jeans,
+    w: inspector ? config.colors.bootShade : config.colors.sneakerShade,
+    W: inspector ? config.colors.boot : config.colors.sneaker,
+    s: config.colors.skinShade, S: config.colors.skin,
+    b: config.colors.backpackShade, B: config.colors.backpack,
+    n: config.colors.uniformShade, N: config.colors.uniformLight,
+    v: config.colors.vestShade, V: config.colors.vest,
+    r: config.colors.reflectiveShade, R: config.colors.reflective,
+  }));
+
+  function composeCharacter(body, frame, pose) {
+    const sprite = config.sprites;
+    const grid = Array.from({ length: sprite.height }, () => Array(sprite.width).fill('.'));
+    const stamp = (rows, x, y, mirror = false) => rows.forEach((row, v) => {
+      Array.from(row).forEach((_, u) => {
+        const cell = row[mirror ? row.length - u - 1 : u];
+        if (cell !== '.' && grid[y + v] && x + u < sprite.width) {
+          grid[y + v][x + u] = cell;
+        }
       });
-      drawVolume({ ...bounds, width: bounds.width * 0.44 }, height * 0.94, height,
-        config.colors.uniform);
-      ctx.restore();
     });
+    const crouch = pose === 'crouch';
+    const top = crouch ? Math.round(sprite.height * (1 - config.crouchScale)) : 0;
+    const torso = crouch ? [...body.slice(0, 7), ...body.slice(9, 14)] : body;
+    const armY = crouch ? [20, 20] : pose === 'jump' ? [5, 5] : sprite.runArmOffsets[frame];
+    stamp(sprite.arm, 1, armY[0]);
+    stamp(sprite.arm, 12, armY[1], true);
+    stamp(crouch ? sprite.crouchLegs : pose === 'jump' ? sprite.jumpLegs : sprite.runLegs[frame],
+      4, top + torso.length);
+    stamp(torso, 4, top);
+    return grid.map(row => row.join(''));
   }
 
-  function drawPerson(context, inspector = false, aspect = 0.55, pose = {}) {
+  // Compose the twelve tiny grids once; frames never allocate or modify sprite data.
+  const characterSprites = [config.sprites.runnerBody, config.sprites.inspectorBody].map(body => ({
+    run: config.sprites.runLegs.map((_, frame) => composeCharacter(body, frame, 'run')),
+    jump: composeCharacter(body, 0, 'jump'), crouch: composeCharacter(body, 0, 'crouch'),
+  }));
+
+  function characterSprite(inspector, action = 'run') {
+    const sprites = characterSprites[inspector ? 1 : 0];
+    if (action === 'jump' || action === 'crouch') return sprites[action];
     const gait = runningPose(inspector);
-    const accent = inspector ? config.colors.kontrolleurBlue : config.colors.player;
-    const trim = inspector ? config.colors.kontrolleurYellow : accent;
-    const sleeves = accent;
-    const foot = offset => {
-      const phase = ((gait.phase / (Math.PI * 2) + offset) % 1 + 1) % 1;
-      const planted = phase < 0.58;
-      const recovery = planted ? 0 : (phase - 0.58) / 0.42;
-      const lift = Math.sin(Math.PI * recovery) * 14 * gait.strength;
-      const travel = planted ? phase / 0.58 : 1 - motionEase(recovery);
-      return { y: 94 + (travel * 10 - 6) * gait.strength - lift, lift,
-        swing: Math.sin(phase * Math.PI * 2) * gait.strength };
-    };
-    // Each foot spends longer planted than recovering; the knee folds on recovery.
-    for (const [side, offset] of [[-1, 0], [1, 0.5]]) {
-      const leg = foot(offset);
-      const hipX = 50 + side * 10;
-      const ankleX = hipX + leg.swing * 3 + (pose.step || 0) * side * 6;
-      const ankleY = pose.crouch ? 96 : leg.y;
-      const hipY = pose.crouch ? 81 : 59;
-      // Two fixed-length leg segments fold outward as the pelvis lowers.
-      const knee = pose.crouch
-        ? [hipX + side * Math.sqrt(18 ** 2 - ((ankleY - hipY) / 2) ** 2) / aspect,
-          (hipY + ankleY) / 2]
-        : [hipX + side * 2 + leg.swing * 2, Math.min(ankleY - 7, 77 - leg.lift * 0.5)];
-      strokeLine(context, [[hipX, hipY], knee, [ankleX, ankleY]],
-        inspector ? accent : config.colors.uniform, 12);
-      strokeLine(context, [[ankleX - 5, ankleY + 1], [ankleX + 5, ankleY]], trim, 6);
-      if (inspector) strokeLine(context, [[hipX + side * 3, 64], [knee[0], knee[1] - 5]], trim, 3);
-      const armDrive = -leg.swing;
-      const shoulder = [50 + side * 25, pose.crouch ? 51 : 29];
-      const elbow = [50 + side * (30 - armDrive * 3), (pose.crouch ? 65 : 43) - armDrive * 3];
-      const hand = [50 + side * (22 - armDrive * 5),
-        (pose.crouch ? 76 : 54) + armDrive * 6 - (pose.recoil || 0) * 11];
-      strokeLine(context, [shoulder, elbow, hand], sleeves, 11);
-      if (inspector) strokeLine(context, [shoulder,
-        [(shoulder[0] + elbow[0]) / 2, (shoulder[1] + elbow[1]) / 2]], trim, 11);
-    }
-    // Weight transfer affects the torso and head, leaving the planted foot grounded.
-    context.save();
-    context.translate(gait.sway, gait.bob + (pose.crouch ? 22 : 0));
-    if (pose.crouch) context.transform(1, 0, -0.12, 1, 58 * 0.12, 0);
-    context.fillStyle = sleeves;
-    context.beginPath();
-    context.moveTo(38, 24);
-    context.quadraticCurveTo(27, 24, 22, 30);
-    context.lineTo(33, 58); context.quadraticCurveTo(50, 63, 67, 58);
-    context.lineTo(78, 30); context.quadraticCurveTo(73, 24, 62, 24);
-    context.closePath(); context.fill();
-    context.shadowBlur = 0;
-    // Compensate for the artwork transform so heads remain round on tall windows.
-    const headRadiusX = 7.5 / aspect;
-    context.fillStyle = config.colors.player;
-    context.fillRect(44, 18, 12, 7);
-    context.fillStyle = config.colors.uniform;
-    context.beginPath();
-    context.ellipse(50, 10.5, headRadiusX, 7.5, 0, 0, Math.PI * 2);
-    context.fill();
-    if (inspector) {
-      context.fillStyle = accent;
-      context.fillRect(50 - headRadiusX * 1.05, 4, headRadiusX * 2.1, 6);
-      strokeLine(context, [[50 - headRadiusX, 10], [50 + headRadiusX, 10]], trim, 2);
-      // Broad yellow yoke, sleeve panels, and bands: about 30% of the outfit.
-      context.fillStyle = trim;
-      context.beginPath();
-      context.moveTo(25, 27); context.lineTo(75, 27);
-      context.lineTo(71, 38); context.lineTo(29, 38);
-      context.closePath(); context.fill();
-      context.fillRect(35, 54, 30, 3);
-    } else {
-      context.fillStyle = config.colors.uniform;
-      context.fillRect(37, 31, 26, 22);
-      strokeLine(context, [[40, 34], [60, 34]], config.colors.signText, 2);
-      strokeLine(context, [[34, 56], [66, 56]], config.colors.signText, 2);
-    }
-    context.restore();
+    const cycle = ((gait.phase / (Math.PI * 2)) % 1 + 1) % 1;
+    const frame = !gait.strength || reducedMotion.matches ? 1 : Math.floor(cycle * sprites.run.length);
+    return sprites.run[frame];
+  }
+
+  function paintPixelSprite(rows, palette, anchor, height, maxWidth = Infinity, rim = false) {
+    const ratio = viewport.pixelRatio;
+    const pixelScale = Math.max(1, Math.floor(Math.min(height / rows.length,
+      maxWidth / rows[0].length) * ratio));
+    const width = rows[0].length * pixelScale, spriteHeight = rows.length * pixelScale;
+    const x = Math.round(anchor.x * ratio - width / 2);
+    const y = Math.round(anchor.y * ratio - spriteHeight);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.shadowBlur = 0;
+    rows.forEach((row, v) => Array.from(row).forEach((cell, u) => {
+      if (cell === '.') return;
+      ctx.fillStyle = palette[cell];
+      const left = x + u * pixelScale, top = y + v * pixelScale;
+      ctx.fillRect(left, top, pixelScale, pixelScale);
+      if (rim) {
+        const edge = Math.min(pixelScale, Math.max(1, Math.round(ratio)));
+        ctx.fillStyle = config.colors.objectRim;
+        if (!rows[v - 1] || rows[v - 1][u] === '.') ctx.fillRect(left, top, pixelScale, edge);
+        if (!rows[v + 1] || rows[v + 1][u] === '.') ctx.fillRect(left, top + pixelScale - edge, pixelScale, edge);
+        if (u === 0 || row[u - 1] === '.') ctx.fillRect(left, top, edge, pixelScale);
+        if (u === row.length - 1 || row[u + 1] === '.') ctx.fillRect(left + pixelScale - edge, top, edge, pixelScale);
+      }
+    }));
+    ctx.restore();
+    return { x, y, width, height: spriteHeight, pixelScale };
+  }
+
+  function drawBottle(bottle) {
+    // The larger billboard is independent of the unchanged collection footprint.
+    const bounds = { x: laneX(bottle.lane), y: bottle.y - config.bottleSize / 2,
+      width: config.bottleSize, height: config.bottleSize };
+    const opacity = streetOpacity(bounds);
+    if (opacity === 0) return;
+    const point = project(bounds.x, bounds.y + bounds.height / 2);
+    ctx.save();
+    ctx.globalAlpha *= opacity;
+    drawGroundShadow(bounds);
+    const result = paintPixelSprite(config.sprites.bottle, bottlePalette, point,
+      config.bottleSize * config.sprites.bottleScale * point.scale, Infinity, true);
+    ctx.restore();
+    return result;
+  }
+
+  function drawCharacter(bounds, inspector, action = 'run', lift = 0) {
+    const point = project(bounds.x, bounds.y + bounds.height / 2);
+    if (!point) return;
+    const size = inspector ? config.kontrolleurSize : config.playerSize;
+    const height = size * config.sprites.characterHeightFactor * point.scale;
+    const maxWidth = Math.min(height * config.sprites.characterAspect,
+      bounds.width * config.sprites.characterMaxWidthFactor * point.roadScale);
+    drawGroundShadow(bounds);
+    return paintPixelSprite(characterSprite(inspector, action), characterPalettes[inspector ? 1 : 0],
+      { x: point.x, y: point.y - lift * point.scale }, height, maxWidth);
   }
 
   function drawPlayer() {
@@ -1430,40 +1416,29 @@
     const jumpProgress = player.action === 'jump'
       ? 1 - player.actionRemaining / config.jumpDuration : 0;
     const lift = Math.sin(jumpProgress * Math.PI) * config.jumpHeight;
-    withObjectFrame({ ...bounds, artHeight: config.playerSize }, () => {
-      const anchor = artworkPoint(bounds.x, bounds.y + bounds.height / 2);
-      ctx.save();
-      // Grounded sidestep: lean around the feet, with no added jump or vertical arc.
-      ctx.translate(anchor.x, anchor.y);
-      ctx.transform(1 + pose.recoil * 0.03, 0, -pose.lean, 1 - pose.recoil * 0.18, 0, 0);
-      ctx.translate(-anchor.x, -anchor.y);
-      drawArtwork({ ...bounds, artHeight: config.playerSize, crouch: pose.crouch },
-        (context, aspect) => drawPerson(context, false, aspect, pose), lift);
-      ctx.restore();
-    });
+    return drawCharacter(bounds, false, player.action, lift);
   }
 
   function drawKontrolleur() {
-    const bounds = { x: characterPose().x,
+    return drawCharacter({ x: characterPose().x,
       y: config.playerY + kontrolleurDistance() - config.kontrolleurSize / 2,
-      width: config.kontrolleurSize, height: config.kontrolleurSize,
-      accent: config.colors.kontrolleurBlue };
-    withObjectFrame(bounds, () => drawArtwork(bounds,
-      (context, aspect) => drawPerson(context, true, aspect), 0, 1, runningPose(true)));
+      width: config.kontrolleurSize, height: config.kontrolleurSize }, true);
   }
 
   function drawImpactContact() {
     const impact = characterMotion.impactObstacle;
     const pose = characterPose();
-    if (!impact || impact.y >= config.playerY || impact.definition.type !== 'sign' || pose.recoil <= 0) return;
+    if (!impact || impact.definition.type !== 'sign' || pose.recoil <= 0) return;
     const visual = signImpactVisual(impact);
     if (!visual || visual.opacity === 0) return;
     const bounds = obstacleDrawBounds({ ...impact, y: visual.y });
+    const opacity = streetOpacity(bounds);
+    if (opacity === 0) return;
     const point = volumePoint(bounds, 0.5, 1, config.signPostHeight);
     if (!point) return;
     const radius = Math.max(5, config.playerSize * project(bounds.x, bounds.y).scale * 0.17);
     ctx.save();
-    ctx.globalAlpha = pose.recoil * visual.opacity;
+    ctx.globalAlpha = pose.recoil * visual.opacity * opacity;
     ctx.lineWidth = Math.max(1.5, viewport.height / config.worldHeight);
     ctx.beginPath();
     ctx.ellipse(point.x, point.y, radius, radius * 0.65, 0, 0, Math.PI * 2);

@@ -54,7 +54,8 @@ function game(reduceMotion = false, { width = 1280, height = 720, pixelRatio = 1
     const originalBitmapText = bitmapText;
     bitmapText = (context, text, ...args) => { window.labels.push(String(text)); originalBitmapText(context, text, ...args); };
     window.test = { update, draw, restart, finishShopRect, exchangePresentation, project, pixelText, pixelIcon,
-      drawObstacle, drawBottle, drawPlayer, rectanglePath, streetOpacity, drawBackdrop,
+      drawObstacle, drawBottle, drawPlayer, drawKontrolleur, characterSprite,
+      rectanglePath, streetOpacity, drawBackdrop, playerDrawBounds, obstacleDrawBounds,
       geometry: (bounds, vertices) => {
         let result;
         withObjectFrame(bounds, () => { result = vertices.map(([u, v, z]) => volumePoint(bounds, u, v, z)); });
@@ -302,7 +303,7 @@ test('HUD uses live score and leaves game state unchanged in portrait and landsc
 test('passed street objects and their shadows stop drawing without leaving simulation', () => {
   const g = game();
   for (const type of ['sign', 'scooter', 'spaeti', 'bottle']) {
-    for (const y of [590, 591, 720, 868.6, 1000]) {
+    for (const y of [592, 600, 720, 868.6, 1000]) {
       const object = { lane: 1, y, definition: { type } };
       g.set(type === 'bottle' ? { bottles: [object] } : { obstacles: [object] });
       const before = JSON.stringify(g.state());
@@ -313,8 +314,10 @@ test('passed street objects and their shadows stop drawing without leaving simul
       assert.equal(JSON.stringify(g.state()), before);
     }
   }
-  assert.equal(g.streetOpacity(590), 0);
-  assert.ok(g.streetOpacity(589) > 0);
+  const playerBounds = g.playerDrawBounds();
+  const row = playerBounds.y + playerBounds.height / 2;
+  assert.equal(g.streetOpacity({ x: 240, y: row - 10, height: 20 }), 0);
+  assert.ok(g.streetOpacity({ x: 240, y: row - 11, height: 20 }) > 0);
 });
 
 test('artwork projection is capped and rejects the camera plane and everything behind it', () => {
@@ -346,7 +349,7 @@ test('H still draws exact collision boxes after artwork is culled', () => {
   assert.ok(!g.operations.some(operation => operation[0] === 'moveTo'));
 });
 
-test('runner, scooter and bottles have no glow; only the requested signs do', () => {
+test('all gameplay artwork is matte, with no glow', () => {
   for (const type of ['runner', 'scooter', 'bottle', 'sign', 'spaeti']) {
     const g = game();
     g.captureRectangles();
@@ -355,7 +358,7 @@ test('runner, scooter and bottles have no glow; only the requested signs do', ()
     else g.drawObstacle({ lane: 1, y: 500, definition: { type } });
     const glowing = g.operations.some(operation => operation[0] === 'set' &&
       operation[1] === 'shadowBlur' && operation[2] > 0);
-    assert.equal(glowing, type === 'sign' || type === 'spaeti', type);
+    assert.equal(glowing, false, type);
     if (type === 'runner' || type === 'scooter') {
       assert.ok(g.operations.some(operation => operation[0] === 'createRadialGradient'));
     }
@@ -378,5 +381,77 @@ test('all four backdrop phases render with bounded work, cached gradients and no
         assert.ok(operation.filter(value => typeof value === 'number').every(Number.isFinite));
       }
     }
+  }
+});
+
+test('street artwork fades and culls at its near face, while the center is still behind it', () => {
+  const g = game();
+  const player = g.playerDrawBounds(), row = player.y + player.height / 2;
+  for (const type of ['sign', 'scooter', 'spaeti']) {
+    const scale = type === 'sign' ? g.config.signHitboxScale : g.config.hitboxScale;
+    const offset = type === 'spaeti' ? 0 : g.config.obstacleHeight * (1 - scale) / 2;
+    const object = { lane: 1, y: row + offset + 0.1, definition: { type } };
+    const bounds = type === 'spaeti'
+      ? { x: 240, y: object.y - g.config.spaetiHeight / 2, height: g.config.spaetiHeight }
+      : g.obstacleDrawBounds(object);
+    assert.ok(bounds.y < row);
+    assert.equal(g.streetOpacity(bounds), 0);
+    g.captureRectangles();
+    g.drawObstacle(object);
+    assert.equal(g.operations.length, 0, type);
+    object.y -= 1;
+    g.captureRectangles();
+    g.drawObstacle(object);
+    assert.ok(g.operations.length > 0, type);
+  }
+});
+
+test('both characters have four distinct run grids, plus jump/crouch poses', () => {
+  const g = game();
+  for (const inspector of [false, true]) {
+    const frames = new Set();
+    for (let i = 0; i < 4; i++) {
+      const frequency = g.config.startSpeed / g.config.playerSize / 2 * (inspector ? 0.86 : 1);
+      g.set({ time: i / (4 * frequency) });
+      const grid = g.characterSprite(inspector);
+      assert.equal(grid.length, g.config.sprites.height);
+      assert.ok(grid.every(row => row.length === g.config.sprites.width));
+      frames.add(grid.join('\n'));
+    }
+    assert.equal(frames.size, 4);
+    const jump = g.characterSprite(inspector, 'jump'), crouch = g.characterSprite(inspector, 'crouch');
+    assert.ok(!frames.has(jump.join('\n')));
+    assert.ok(!frames.has(crouch.join('\n')));
+    assert.ok(crouch.findIndex(row => /[^.]/.test(row)) >= 10);
+  }
+  const reduced = game(true);
+  const still = reduced.characterSprite(false).join('\n');
+  reduced.set({ time: 0.2 });
+  assert.equal(reduced.characterSprite(false).join('\n'), still);
+});
+
+test('sprites use integer backing pixels and characters have no stroked outlines', () => {
+  for (const pixelRatio of [1, 1.25, 2, 3]) {
+    const g = game(false, { width: 390, height: 844, pixelRatio });
+    for (const inspector of [false, true]) {
+      g.captureRectangles();
+      const before = JSON.stringify(g.state());
+      const sprite = inspector ? g.drawKontrolleur() : g.drawPlayer();
+      assert.equal(JSON.stringify(g.state()), before);
+      assert.ok(Number.isInteger(sprite.pixelScale));
+      assert.ok(g.rectangles.length > 80);
+      for (const rectangle of g.rectangles) {
+        assert.ok(rectangle.every(Number.isInteger));
+        assert.equal(rectangle[2], sprite.pixelScale);
+        assert.equal(rectangle[3], sprite.pixelScale);
+      }
+      assert.ok(!g.operations.some(operation => operation[0] === 'stroke'));
+    }
+    g.captureRectangles();
+    const bottle = g.drawBottle({ lane: 1, y: 500 });
+    const target = g.config.bottleSize * g.config.sprites.bottleScale * g.project(240, 500).scale * pixelRatio;
+    assert.ok(bottle.height <= target && target - bottle.height < g.config.sprites.bottle.length);
+    assert.ok(g.rectangles.every(rectangle => rectangle.every(Number.isInteger)));
+    assert.ok(!g.labels.includes('P'));
   }
 });
