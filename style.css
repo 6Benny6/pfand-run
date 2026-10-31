@@ -8,6 +8,13 @@ h1 { font-size: 30px; letter-spacing: -0.04em; margin: 0; }
 .counter { display: flex; align-items: center; gap: 12px; color: #b8c3b6; font-size: 14px; }
 .counter strong { color: #edf2e9; font-size: 28px; font-variant-numeric: tabular-nums; }
 canvas { display: block; width: 100%; max-height: 70svh; aspect-ratio: 2 / 3; object-fit: contain; background: #273036; border-radius: 12px; }
+.pursuit { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; margin-bottom: 8px; font-size: 12px; color: #b8c3b6; }
+meter { width: 120px; accent-color: #e3b94e; }
+.playfield { position: relative; }
+.caught { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; padding: 20px; border-radius: 12px; background: #161d1beF; text-align: center; }
+.caught[hidden] { display: none; }
+.caught h2 { font-size: 44px; margin: 0 0 12px; }
+.caught p { margin: 8px 0; }
 footer { text-align: center; font-size: 12px; line-height: 1.8; color: #b8c3b6; }
 footer p { margin: 12px 0; }
 kbd { font: inherit; padding: 2px 6px; border: 1px solid #52614f; border-radius: 4px; color: #edf2e9; }

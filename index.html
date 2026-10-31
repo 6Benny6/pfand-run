@@ -11,14 +11,25 @@
   <body>
     <main>
       <header>
-        <div><p class="eyebrow">BERLIN · STEP 1</p><h1>Pfand Run</h1></div>
+        <div><p class="eyebrow">BERLIN · STEP 2</p><h1>Pfand Run</h1></div>
         <p class="counter">Crashes <strong id="crashes" aria-live="polite">0</strong></p>
       </header>
-      <canvas id="game" aria-label="Three-lane runner. Left and right switch lanes, up jumps, down crouches."></canvas>
+      <div class="pursuit">
+        <span id="pursuit-label">Kontrolleur out of view</span>
+        <meter id="distance" min="0" max="100" value="100" aria-label="Distance from Kontrolleur" hidden></meter>
+      </div>
+      <div class="playfield">
+        <canvas id="game" aria-label="Three-lane runner. Left and right switch lanes, up jumps, down crouches."></canvas>
+        <div id="caught" class="caught" role="alert" hidden>
+          <h2>Caught!</h2>
+          <p>The BVG Kontrolleur caught you.</p>
+          <p>Press <kbd id="restart-key"></kbd> to restart</p>
+        </div>
+      </div>
       <footer>
         <p><kbd>←</kbd> <kbd>→</kbd> Switch lane &nbsp; <kbd>↑</kbd> Jump &nbsp; <kbd>↓</kbd> Crouch</p>
         <p>Jump over 🛴 scooters · Crouch under <b class="u-sign">U</b> signs</p>
-        <p id="status" role="status">Run keeps going after a crash.</p>
+        <p id="status" role="status">Dodge obstacles to keep the Kontrolleur away.</p>
       </footer>
     </main>
   </body>
