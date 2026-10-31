@@ -11,10 +11,11 @@
   <body>
     <main>
       <header>
-        <div><p class="eyebrow">BERLIN · STEP 3</p><h1>Pfand Run</h1></div>
+        <div><p class="eyebrow">BERLIN · STEP 4</p><h1>Pfand Run</h1></div>
         <p class="counter">Crashes <strong id="crashes" aria-live="polite">0</strong></p>
       </header>
       <p id="pfand" class="pfand" aria-live="polite">Pfand: 0 🍾</p>
+      <p class="pfand">Time left: <span id="countdown" role="timer"></span></p>
       <div class="pursuit">
         <span id="pursuit-label">Kontrolleur out of view</span>
         <meter id="distance" min="0" max="100" value="100" aria-label="Distance from Kontrolleur" hidden></meter>
@@ -25,6 +26,14 @@
           <h2>Caught!</h2>
           <p>The BVG Kontrolleur caught you.</p>
           <p>Press <kbd id="restart-key"></kbd> to restart</p>
+        </div>
+        <div id="finished" class="caught" role="status" hidden>
+          <h2>🥙 Dönerladen</h2>
+          <p>Bottles collected: <strong id="result-bottles"></strong></p>
+          <p>Total Pfand: <strong id="result-pfand"></strong></p>
+          <p>Döner bought: <strong id="result-doener"></strong></p>
+          <p>Left over: <strong id="result-leftover"></strong></p>
+          <p>Press <kbd id="finish-restart-key"></kbd> to restart</p>
         </div>
       </div>
       <footer>

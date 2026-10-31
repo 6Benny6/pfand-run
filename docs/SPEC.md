@@ -9,7 +9,7 @@ if you crash into two obstacles within 3 seconds of each other.
 ## Scoring
 Each Pfand bottle is worth 50 cents and one Döner costs 7,50 (15 bottles
 per Döner). At the end, all bottles are converted into Döner. With fewer
-than 15 bottles the score is 0 Döner.
+than 15 bottles the score is 0 Döner. Bottles
 
 ## Controls
 Arrow keys: left/right switch lane, up = jump, down = crouch. R restarts.
@@ -22,12 +22,15 @@ Arrow keys: left/right switch lane, up = jump, down = crouch. R restarts.
    (never below 0). Switching lane avoids it. (new) A Späti only spawns
    when the player has at least 3 bottles.
 
-## Three behaviors
+## Four behaviors
 1) Three lanes; the player switches lanes, jumps and crouches to dodge.
 2) The first crash brings the Kontrolleur into view as he closes in. A
    second crash within 3 seconds ends the run. (new) If the 3 seconds
    pass without a second crash, he drops back out of view.
-3) Pfand bottles appear on the street and are collected by the player.
+3) Pfand bottles appear on the street. The player collects the bottle by touching it,
+while in the same lane (running or crouching). Jumping over a bottle means it is not
+collected.
+
 
 ## Ending (new)
 - Survive 60 seconds: the Dönerladen appears and the end screen shows

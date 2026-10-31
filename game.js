@@ -11,7 +11,10 @@
   const pursuitLabel = document.querySelector('#pursuit-label');
   const distanceMeter = document.querySelector('#distance');
   const caughtScreen = document.querySelector('#caught');
+  const finishedScreen = document.querySelector('#finished');
+  const countdown = document.querySelector('#countdown');
   document.querySelector('#restart-key').textContent = config.restartKey.toUpperCase();
+  document.querySelector('#finish-restart-key').textContent = config.restartKey.toUpperCase();
   canvas.width = config.worldWidth;
   canvas.height = config.worldHeight;
 
@@ -51,8 +54,38 @@
   let previousTime = null;
   let firstCrashAt = null;
   let caught = false;
+  let finished = false;
+  // Leave enough time for even the tallest hazard to pass completely before the line.
+  const finishClearanceSeconds = (config.playerY - config.spawnY +
+    Math.max(config.obstacleHeight + config.signPostHeight, config.spaetiHeight)) /
+    config.startSpeed + config.maxFrameSeconds;
   const laneWidth = (config.roadRight - config.roadLeft) / config.laneCount;
   const laneX = lane => config.roadLeft + laneWidth * (lane + 0.5);
+
+  function updateCountdown() {
+    countdown.textContent = `${Math.ceil(Math.max(0, config.runDurationSeconds - elapsed))}s`;
+  }
+
+  function finish() {
+    finished = true;
+    firstCrashAt = null;
+    flashRemaining = 0;
+    tollMessageRemaining = 0;
+    tollMessage.textContent = '';
+    player.action = 'run';
+    player.actionRemaining = 0;
+    const totalCents = pfand * config.bottleValueCents;
+    const leftoverCents = totalCents % config.doenerPriceCents;
+    const doener = (totalCents - leftoverCents) / config.doenerPriceCents;
+    const formatEuros = cents => `€${(cents - cents % 100) / 100}.${String(cents % 100).padStart(2, '0')}`;
+    document.querySelector('#result-bottles').textContent = String(pfand);
+    document.querySelector('#result-pfand').textContent = formatEuros(totalCents);
+    document.querySelector('#result-doener').textContent = String(doener);
+    document.querySelector('#result-leftover').textContent = `${formatEuros(leftoverCents)} (${formatEuros(config.doenerPriceCents - leftoverCents)} short of Döner #${doener + 1})`;
+    finishedScreen.hidden = false;
+    status.textContent = 'You reached the Dönerladen!';
+    updatePursuit();
+  }
 
   function kontrolleurDistance() {
     const progress = Math.min(1, (elapsed - firstCrashAt) / config.crashWindowSeconds);
@@ -108,11 +141,14 @@
     flashRemaining = 0;
     firstCrashAt = null;
     caught = false;
+    finished = false;
     previousTime = null;
     crashCounter.textContent = '0';
     caughtScreen.hidden = true;
+    finishedScreen.hidden = true;
     status.textContent = 'Dodge obstacles to keep the Kontrolleur away.';
     updatePursuit();
+    updateCountdown();
   }
 
   function spawnObstacle() {
@@ -131,14 +167,14 @@
   }
 
   window.addEventListener('keydown', event => {
-    if (caught && event.key.toLowerCase() === config.restartKey.toLowerCase()) {
+    if ((caught || finished) && event.key.toLowerCase() === config.restartKey.toLowerCase()) {
       event.preventDefault();
       if (!event.repeat && !document.hidden) restart();
       return;
     }
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     event.preventDefault();
-    if (event.repeat || document.hidden || caught) return;
+    if (event.repeat || document.hidden || caught || finished) return;
     if (event.key === 'ArrowLeft') player.lane = Math.max(0, player.lane - 1);
     if (event.key === 'ArrowRight') player.lane = Math.min(config.laneCount - 1, player.lane + 1);
     if (player.action !== 'run') return;
@@ -153,15 +189,18 @@
   document.addEventListener('visibilitychange', () => { previousTime = null; });
 
   function update(dt) {
-    if (caught) return;
+    if (caught || finished) return;
+    dt = Math.min(dt, config.runDurationSeconds - elapsed);
     elapsed += dt;
+    updateCountdown();
     flashRemaining = Math.max(0, flashRemaining - dt);
     tollMessageRemaining = Math.max(0, tollMessageRemaining - dt);
     if (!tollMessageRemaining) tollMessage.textContent = '';
     const actionAtStart = player.action;
     const actionTimeAtStart = player.actionRemaining;
     // A row is shared across all lanes. Defer due spawns until it is clear.
-    if (elapsed >= spawnAt && elapsed - lastRowAt >= config.rowGapSeconds &&
+    const hazardsAllowed = elapsed < config.runDurationSeconds - finishClearanceSeconds;
+    if (hazardsAllowed && elapsed >= spawnAt && elapsed - lastRowAt >= config.rowGapSeconds &&
         elapsed - lastObstacleAt >= config.minObstacleGapSeconds) {
       spawnObstacle();
       lastRowAt = elapsed;
@@ -170,7 +209,7 @@
     }
     // Reserve the next obstacle row so bottles never delay its scheduled spawn.
     if (elapsed >= bottleSpawnAt && elapsed - lastRowAt >= config.rowGapSeconds &&
-        spawnAt - elapsed >= config.rowGapSeconds) {
+        (!hazardsAllowed || spawnAt - elapsed >= config.rowGapSeconds)) {
       bottles.push({ lane: Math.floor(random() * config.laneCount), y: config.spawnY });
       lastRowAt = elapsed;
       bottleSpawnAt = elapsed + nextBottleInterval();
@@ -182,7 +221,7 @@
         obstacle.passed = true;
         const crossingTime = (config.playerY - previousY) / config.startSpeed;
         const action = actionTimeAtStart > crossingTime ? actionAtStart : 'run';
-        if (obstacle.lane === player.lane) {
+        if (obstacle.lane === player.lane && !caught && !finished) {
           if (obstacle.definition.type === 'spaeti') {
             pfand = Math.max(0, pfand - config.spaetiCost);
             pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
@@ -205,6 +244,9 @@
       const previousY = bottle.y;
       bottle.y += config.startSpeed * dt;
       if (previousY < config.playerY && bottle.y >= config.playerY && bottle.lane === player.lane) {
+        const crossingTime = (config.playerY - previousY) / config.startSpeed;
+        const action = actionTimeAtStart > crossingTime ? actionAtStart : 'run';
+        if (action === 'jump') return true;
         pfand += 1;
         pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
         return false; // Remove immediately: every bottle can count only once.
@@ -218,6 +260,7 @@
     }
     obstacles = obstacles.filter(obstacle => obstacle.y < config.worldHeight +
       Math.max(config.obstacleHeight + config.signPostHeight, config.spaetiHeight));
+    if (elapsed >= config.runDurationSeconds) finish();
   }
 
   function draw() {
@@ -306,5 +349,6 @@
     }
     requestAnimationFrame(frame);
   }
+  updateCountdown();
   requestAnimationFrame(frame);
 })();
