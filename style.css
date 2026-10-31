@@ -7,6 +7,8 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 h1 { font-size: 30px; letter-spacing: -0.04em; margin: 0; }
 .counter { display: flex; align-items: center; gap: 12px; color: #b8c3b6; font-size: 14px; }
 .counter strong { color: #edf2e9; font-size: 28px; font-variant-numeric: tabular-nums; }
+.pfand { margin: 0 0 8px; color: #c8e69e; font-variant-numeric: tabular-nums; }
+#toll-message { min-height: 1.8em; color: #f5d66f; }
 canvas { display: block; width: 100%; max-height: 70svh; aspect-ratio: 2 / 3; object-fit: contain; background: #273036; border-radius: 12px; }
 .pursuit { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; margin-bottom: 8px; font-size: 12px; color: #b8c3b6; }
 meter { width: 120px; accent-color: #e3b94e; }

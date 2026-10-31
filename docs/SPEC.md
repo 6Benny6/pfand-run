@@ -1,13 +1,43 @@
 # Pfand Run: Spec
-## Goal: The goal of the game is to collect Pfandbottles, dodge obstacles and escape the BVG kontrolleur who is chasing you. After 60 seconds without being caught (running into two obstacles within 3 seconds of eachother) you arrive at the dönerladen and all your pfandflaschen is converted into döner. With more döner = more points
-## Scoring: Each pfandbottle is worth 50cents and one döner costs 7,50. So at then end all your pfandflaschen are converted into Döner.
-## Obstacles indlude ubahn station signs, parked lime scooterss and also spätis which want your pfandflaschen money to be spent in their stores.
-## 1) 3 lanes, switching lanes, dodges obstacles by crouching under or jumping over
-2) 1 crash into an obstacle causes the bvg kontrolleur to be displayed on your screen as he is closing on you, further crash = caught and the run ends
-3) pfandflaschen (bottles) appear on the streets and are collected by the player 
-## It's different because it directly applies a common game idea into the context of the wild city that is berlin, also it could be cool to explain and teach people how an AI learns exactly in this game and adapts to the troubles of Berlin life.
-## obstacles include
-1) U-Bahn station signs, with the player having to crouch under and jumping resulting in a crash
-2) Lime scooters, which can only be dodged by switching into a lane without an obstacle or jumping over. Crouching while in contact with the scooter results in a crash.
-3) Späti shops, which can be passed through but tax the player by 3 bottles.
-## Good to know: With fewer than 15 bottles the score = 0 Döner, arrow keys serve as controller with up arrow = jump and down arrow = crouch.
+
+## Goal
+Collect Pfand bottles, dodge obstacles and escape the BVG Kontrolleur who
+is chasing you. If you survive 60 seconds you arrive at the Dönerladen and
+all your Pfand is converted into Döner. More Döner = more points. You lose
+if you crash into two obstacles within 3 seconds of each other.
+
+## Scoring
+Each Pfand bottle is worth 50 cents and one Döner costs 7,50 (15 bottles
+per Döner). At the end, all bottles are converted into Döner. With fewer
+than 15 bottles the score is 0 Döner.
+
+## Controls
+Arrow keys: left/right switch lane, up = jump, down = crouch. R restarts.
+
+## Obstacles
+1) U-Bahn station signs: crouch under them. Jumping into one is a crash.
+2) Lime scooters: jump over them or switch to a lane without one.
+   Crouching into one is a crash.
+3) Späti shops: not a crash. Passing through one costs 3 bottles
+   (never below 0). Switching lane avoids it. (new) A Späti only spawns
+   when the player has at least 3 bottles.
+
+## Three behaviors
+1) Three lanes; the player switches lanes, jumps and crouches to dodge.
+2) The first crash brings the Kontrolleur into view as he closes in. A
+   second crash within 3 seconds ends the run. (new) If the 3 seconds
+   pass without a second crash, he drops back out of view.
+3) Pfand bottles appear on the street and are collected by the player.
+
+## Ending (new)
+- Survive 60 seconds: the Dönerladen appears and the end screen shows
+  bottles collected, total Pfand in euros, and the number of Döner.
+- Caught: the run ends with a "caught" screen and a restart key.
+
+## What's different
+It applies a common game idea to the context of the wild city that is
+Berlin.
+
+## Later (stretch)
+Show how an AI learns to play this game and adapts to the troubles of
+Berlin life. Not part of version 1.

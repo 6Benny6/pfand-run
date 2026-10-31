@@ -5,6 +5,8 @@
   const canvas = document.querySelector('#game');
   const ctx = canvas.getContext('2d');
   const crashCounter = document.querySelector('#crashes');
+  const pfandCounter = document.querySelector('#pfand');
+  const tollMessage = document.querySelector('#toll-message');
   const status = document.querySelector('#status');
   const pursuitLabel = document.querySelector('#pursuit-label');
   const distanceMeter = document.querySelector('#distance');
@@ -28,11 +30,22 @@
       config.spawnIntervalMin + random() * (config.spawnIntervalMax - config.spawnIntervalMin));
   }
 
+  function nextBottleInterval() {
+    return config.bottleSpawnIntervalMin + random() *
+      (config.bottleSpawnIntervalMax - config.bottleSpawnIntervalMin);
+  }
+
   const player = { lane: config.startLane, action: 'run', actionRemaining: 0 };
   let obstacles = [];
+  let bottles = [];
   const recentLanes = [];
   let elapsed = 0;
   let spawnAt = nextInterval();
+  let bottleSpawnAt = nextBottleInterval();
+  let lastRowAt = -Infinity;
+  let lastObstacleAt = -Infinity;
+  let pfand = 0;
+  let tollMessageRemaining = 0;
   let crashes = 0;
   let flashRemaining = 0;
   let previousTime = null;
@@ -80,9 +93,17 @@
     player.action = 'run';
     player.actionRemaining = 0;
     obstacles = [];
+    bottles = [];
     recentLanes.length = 0;
     elapsed = 0;
     spawnAt = nextInterval();
+    bottleSpawnAt = nextBottleInterval();
+    lastRowAt = -Infinity;
+    lastObstacleAt = -Infinity;
+    pfand = 0;
+    pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
+    tollMessageRemaining = 0;
+    tollMessage.textContent = '';
     crashes = 0;
     flashRemaining = 0;
     firstCrashAt = null;
@@ -99,7 +120,11 @@
     const allowedLanes = Array.from({ length: config.laneCount }, (_, lane) => lane)
       .filter(lane => new Set([...recentLanes, lane]).size < config.laneCount);
     const lane = allowedLanes[Math.floor(random() * allowedLanes.length)];
-    const definition = config.obstacles[Math.floor(random() * config.obstacles.length)];
+    const canSpawnSpaeti = pfand >= config.spaetiCost &&
+      !obstacles.some(obstacle => obstacle.definition.type === 'spaeti');
+    const definition = canSpawnSpaeti && random() < config.spaetiSpawnChance
+      ? config.spaeti
+      : config.obstacles[Math.floor(random() * config.obstacles.length)];
     obstacles.push({ lane, y: config.spawnY, definition, passed: false });
     recentLanes.push(lane);
     if (recentLanes.length > config.laneCount - 1) recentLanes.shift();
@@ -131,11 +156,24 @@
     if (caught) return;
     elapsed += dt;
     flashRemaining = Math.max(0, flashRemaining - dt);
+    tollMessageRemaining = Math.max(0, tollMessageRemaining - dt);
+    if (!tollMessageRemaining) tollMessage.textContent = '';
     const actionAtStart = player.action;
     const actionTimeAtStart = player.actionRemaining;
-    if (elapsed >= spawnAt) {
+    // A row is shared across all lanes. Defer due spawns until it is clear.
+    if (elapsed >= spawnAt && elapsed - lastRowAt >= config.rowGapSeconds &&
+        elapsed - lastObstacleAt >= config.minObstacleGapSeconds) {
       spawnObstacle();
+      lastRowAt = elapsed;
+      lastObstacleAt = elapsed;
       spawnAt = elapsed + nextInterval();
+    }
+    // Reserve the next obstacle row so bottles never delay its scheduled spawn.
+    if (elapsed >= bottleSpawnAt && elapsed - lastRowAt >= config.rowGapSeconds &&
+        spawnAt - elapsed >= config.rowGapSeconds) {
+      bottles.push({ lane: Math.floor(random() * config.laneCount), y: config.spawnY });
+      lastRowAt = elapsed;
+      bottleSpawnAt = elapsed + nextBottleInterval();
     }
     for (const obstacle of obstacles) {
       const previousY = obstacle.y;
@@ -144,9 +182,16 @@
         obstacle.passed = true;
         const crossingTime = (config.playerY - previousY) / config.startSpeed;
         const action = actionTimeAtStart > crossingTime ? actionAtStart : 'run';
-        if (obstacle.lane === player.lane && action !== obstacle.definition.requiredAction) {
-          recordCrash(elapsed - dt + crossingTime);
-          if (caught) break;
+        if (obstacle.lane === player.lane) {
+          if (obstacle.definition.type === 'spaeti') {
+            pfand = Math.max(0, pfand - config.spaetiCost);
+            pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
+            tollMessage.textContent = `Späti-Preise: -${config.spaetiCost} ${config.bottleEmoji}`;
+            tollMessageRemaining = config.spaetiMessageDuration;
+          } else if (action !== obstacle.definition.requiredAction) {
+            recordCrash(elapsed - dt + crossingTime);
+            if (caught) break;
+          }
         }
       }
     }
@@ -156,12 +201,23 @@
     }
     updatePursuit();
     if (caught) return;
+    bottles = bottles.filter(bottle => {
+      const previousY = bottle.y;
+      bottle.y += config.startSpeed * dt;
+      if (previousY < config.playerY && bottle.y >= config.playerY && bottle.lane === player.lane) {
+        pfand += 1;
+        pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
+        return false; // Remove immediately: every bottle can count only once.
+      }
+      return bottle.y < config.worldHeight + config.bottleSize;
+    });
     player.actionRemaining = Math.max(0, player.actionRemaining - dt);
     if (!player.actionRemaining && player.action !== 'run') {
       player.action = 'run';
       if (firstCrashAt === null) status.textContent = 'Dodge obstacles to keep the Kontrolleur away.';
     }
-    obstacles = obstacles.filter(obstacle => obstacle.y < config.worldHeight + config.obstacleHeight);
+    obstacles = obstacles.filter(obstacle => obstacle.y < config.worldHeight +
+      Math.max(config.obstacleHeight + config.signPostHeight, config.spaetiHeight));
   }
 
   function draw() {
@@ -183,6 +239,21 @@
     for (const obstacle of obstacles) {
       const x = laneX(obstacle.lane);
       const { definition, y } = obstacle;
+      if (definition.type === 'spaeti') {
+        const left = x - config.obstacleWidth / 2;
+        const top = y - config.spaetiHeight;
+        ctx.fillStyle = definition.shopColor;
+        ctx.fillRect(left, top, config.obstacleWidth, config.spaetiHeight);
+        ctx.fillStyle = definition.color;
+        ctx.fillRect(left, top, config.obstacleWidth, config.obstacleHeight);
+        ctx.fillRect(left + config.spaetiWindowInset, top + config.obstacleHeight + config.spaetiWindowInset,
+          config.obstacleWidth - config.spaetiWindowInset * 2,
+          config.spaetiHeight - config.obstacleHeight - config.spaetiWindowInset * 2);
+        ctx.fillStyle = definition.textColor;
+        ctx.font = `bold ${config.spaetiLabelSize}px system-ui`;
+        ctx.fillText(definition.label, x, top + config.obstacleHeight / 2);
+        continue;
+      }
       const height = config.obstacleHeight;
       const signOffset = definition.type === 'sign' ? config.signPostHeight : 0;
       ctx.fillStyle = definition.color;
@@ -194,6 +265,10 @@
       ctx.fillStyle = definition.textColor;
       ctx.font = `bold ${config.obstacleFontSize}px system-ui`;
       ctx.fillText(definition.label, x, y - signOffset - height / 2);
+    }
+    ctx.font = `${config.bottleSize}px system-ui`;
+    for (const bottle of bottles) {
+      ctx.fillText(config.bottleEmoji, laneX(bottle.lane), bottle.y - config.bottleSize / 2);
     }
     const x = laneX(player.lane);
     ctx.fillStyle = config.playerShadowColor;
