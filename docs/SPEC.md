@@ -11,8 +11,11 @@ Each Pfand bottle is worth 50 cents and one Döner costs 7,50 (15 bottles
 per Döner). At the end, all bottles are converted into Döner. With fewer
 than 15 bottles the score is 0 Döner.
 
-## Controls
-Arrow keys: left/right switch lane, up = jump, down = crouch. R restarts.
+## Controls = arrow keys
+Left/right = switch lane. Up = jump (fixed length, ignored while crouching).
+Down = crouch while the key is held, for at most 2 seconds. After that the
+player stands up even if the key is still held, and must release and press
+again to crouch again. R restarts.
 
 ## Obstacles
 1) U-Bahn station signs: crouch under them. Jumping into one is a crash.
