@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pfand Run — Playable Core</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="config.js" defer></script>
+    <script src="game.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div><p class="eyebrow">BERLIN · STEP 1</p><h1>Pfand Run</h1></div>
+        <p class="counter">Crashes <strong id="crashes" aria-live="polite">0</strong></p>
+      </header>
+      <canvas id="game" aria-label="Three-lane runner. Left and right switch lanes, up jumps, down crouches."></canvas>
+      <footer>
+        <p><kbd>←</kbd> <kbd>→</kbd> Switch lane &nbsp; <kbd>↑</kbd> Jump &nbsp; <kbd>↓</kbd> Crouch</p>
+        <p>Jump over 🛴 scooters · Crouch under <b class="u-sign">U</b> signs</p>
+        <p id="status" role="status">Run keeps going after a crash.</p>
+      </footer>
+    </main>
+  </body>
+</html>
