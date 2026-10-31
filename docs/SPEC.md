@@ -19,17 +19,17 @@ Arrow keys: left/right switch lane, up = jump, down = crouch. R restarts.
 2) Lime scooters: jump over them or switch to a lane without one.
    Crouching into one is a crash.
 3) Späti shops: not a crash. Passing through one costs 3 bottles
-   (never below 0). Switching lane avoids it. (new) A Späti only spawns
+   (never below 0). Switching lane avoids it. A Späti only spawns
    when the player has at least 3 bottles.
 Rule: Obstacles must be cleared for their whole length. A crash takes place
  if the player is in the obstacle's lane and the required action (jump over
- scooter/ crouch under u-bahn) is not activated for the entire time the 
-obstacles overlaps the player. one obstacle can cause one crash at most.
+ scooter/ crouch under u-bahn) is not active for the entire time the 
+obstacle overlaps the player. One obstacle can cause one crash at most.
 
 ## Three behaviors
 1) Three lanes; the player switches lanes, jumps and crouches to dodge.
 2) The first crash brings the Kontrolleur into view as he closes in. A
-   second crash within 3 seconds ends the run. (new) If the 3 seconds
+   second crash within 3 seconds ends the run. If the 3 seconds
    pass without a second crash, he drops back out of view.
 3) Pfand bottles appear on the street. The player collects the bottle by touching it,
 while in the same lane (running or crouching). Jumping over a bottle means it is not 
