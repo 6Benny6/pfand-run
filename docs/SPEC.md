@@ -44,6 +44,11 @@ collected.
   bottles collected, total Pfand in euros, and the number of Döner.
 - Caught: the run ends with a "caught" screen and a restart key.
 
+## Look
+The game is seen from behind the runner, with the road narrowing toward
+a vanishing point. Berlin at dusk: dark asphalt, warm lamps, neon signs.
+Everything is drawn in code. Colors live in config.js so they can be tuned.
+
 ## What's different
 It applies a common game idea to the context of the wild city that is
 Berlin.
