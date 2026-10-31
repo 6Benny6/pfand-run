@@ -40,6 +40,7 @@ window.GAME_CONFIG = Object.freeze({
   playerY: 590,
   playerSize: 48,
   hitboxScale: 0.7,
+  signHitboxScale: 0.6,
   debugHitboxes: false,
   jumpHeight: 65,
   crouchScale: 0.55,

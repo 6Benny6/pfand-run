@@ -65,9 +65,14 @@
   const laneX = lane => config.roadLeft + laneWidth * (lane + 0.5);
   // Shrink both ground hitboxes around their existing centers.
   const overlapCenterY = config.playerY - config.playerSize / 2 + config.obstacleHeight / 2;
-  const overlapHalfHeight = (config.playerSize + config.obstacleHeight) * config.hitboxScale / 2;
-  const overlapStartY = overlapCenterY - overlapHalfHeight;
-  const overlapEndY = overlapCenterY + overlapHalfHeight;
+  const obstacleHitboxScale = obstacle => obstacle.definition.type === 'sign'
+    ? config.signHitboxScale : config.hitboxScale;
+
+  function overlapBounds(obstacle) {
+    const halfHeight = (config.playerSize * config.hitboxScale +
+      config.obstacleHeight * obstacleHitboxScale(obstacle)) / 2;
+    return { overlapStartY: overlapCenterY - halfHeight, overlapEndY: overlapCenterY + halfHeight };
+  }
 
   function updateCountdown() {
     countdown.textContent = `${Math.ceil(Math.max(0, config.runDurationSeconds - elapsed))}s`;
@@ -216,6 +221,7 @@
     if (event.key === 'ArrowRight') player.lane = Math.min(config.laneCount - 1, player.lane + 1);
     if (player.lane !== previousLane) {
       for (const obstacle of obstacles) {
+        const { overlapStartY, overlapEndY } = overlapBounds(obstacle);
         if (obstacle.definition.type !== 'spaeti' && !obstacle.crashed &&
             obstacle.lane === previousLane && obstacle.y > overlapStartY &&
             obstacle.y < overlapEndY) {
@@ -265,6 +271,7 @@
       obstacle.y += config.startSpeed * dt;
       if (obstacle.definition.type !== 'spaeti') {
         if (obstacle.passed || obstacle.crashed) continue;
+        const { overlapStartY, overlapEndY } = overlapBounds(obstacle);
         // Sweep the full frame against the player's fixed ground footprint.
         const overlapStart = Math.max(0,
           (overlapStartY - previousY) / config.startSpeed);
@@ -409,11 +416,12 @@
     // Collision uses ground centers, without jump lift, crouch scale, or sign posts.
     ctx.strokeRect(laneX(player.lane) - playerSize / 2,
       config.playerY - config.playerSize / 2 - playerSize / 2, playerSize, playerSize);
-    const width = config.obstacleWidth * config.hitboxScale;
-    const height = config.obstacleHeight * config.hitboxScale;
     let overlapping = false;
     for (const obstacle of obstacles) {
       if (obstacle.definition.type === 'spaeti') continue;
+      const { overlapStartY, overlapEndY } = overlapBounds(obstacle);
+      const width = config.obstacleWidth * obstacleHitboxScale(obstacle);
+      const height = config.obstacleHeight * obstacleHitboxScale(obstacle);
       const overlap = obstacle.lane === player.lane &&
         obstacle.y > overlapStartY && obstacle.y < overlapEndY;
       overlapping ||= overlap;
