@@ -22,3 +22,5 @@ footer p { margin: 12px 0; }
 kbd { font: inherit; padding: 2px 6px; border: 1px solid #52614f; border-radius: 4px; color: #edf2e9; }
 .u-sign { padding: 1px 5px; background: #2878ce; color: white; }
 #status { color: #8f9d8c; }
+
+#doenerladen { width: min(80%, 320px); max-height: 18svh; aspect-ratio: 32 / 15; background: transparent; border-radius: 0; margin-bottom: 8px; }

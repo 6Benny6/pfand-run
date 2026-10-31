@@ -433,22 +433,193 @@
     }
   }
 
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  // Artwork uses a 100 × 100 local frame, clipped to the projected world box.
+  // Jump/crouch affect only artwork; the H overlay keeps its ground footprint.
+  function drawArtwork(bounds, paint, lift = 0, heightScale = 1) {
+    const center = project(bounds.x, bounds.y);
+    const top = project(bounds.x, bounds.y - bounds.height / 2);
+    const bottom = project(bounds.x, bounds.y + bounds.height / 2);
+    const width = bounds.width * center.scale;
+    const height = (bottom.y - top.y) * heightScale;
+    ctx.save();
+    ctx.shadowColor = config.colors.playerShadow;
+    ctx.shadowBlur = 0;
+    rectanglePath(bounds, lift, heightScale);
+    ctx.clip();
+    ctx.translate(center.x - width / 2, bottom.y - height - lift * center.scale);
+    ctx.scale(width / 100, height / 100);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    paint(ctx);
+    ctx.restore();
+  }
+
+  function neon(context, color, blur = 6) {
+    context.strokeStyle = color;
+    context.shadowColor = color;
+    context.shadowBlur = blur;
+  }
+
+  function strokeLine(context, points, color, width) {
+    context.strokeStyle = color;
+    context.lineWidth = width;
+    context.beginPath();
+    points.forEach(([x, y], i) => {
+      if (i === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.stroke();
+  }
+
+  function disc(context, x, y, radius, color) {
+    context.fillStyle = color;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  function drawSign(context) {
+    context.fillStyle = config.colors.sign;
+    context.fillRect(1, 1, 98, 98);
+    neon(context, config.colors.signText);
+    context.lineWidth = 3;
+    context.strokeRect(3, 3, 94, 94);
+    context.fillStyle = config.colors.signText;
+    context.font = '900 86px system-ui';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText('U', 50, 51);
+  }
+
+  function drawScooter(context) {
+    neon(context, config.colors.scooter);
+    for (const x of [16, 84]) {
+      disc(context, x, 78, 16, config.colors.uniform);
+      context.lineWidth = 4;
+      context.stroke();
+      disc(context, x, 78, 5, config.colors.scooter);
+    }
+    strokeLine(context, [[16, 77], [35, 78], [72, 78], [79, 16]], config.colors.scooter, 9);
+    strokeLine(context, [[67, 12], [93, 12]], config.colors.scooter, 8);
+    strokeLine(context, [[32, 70], [65, 70]], config.colors.signText, 2);
+    context.shadowBlur = 0;
+    strokeLine(context, [[79, 25], [82, 58]], config.colors.scooterText, 2);
+  }
+
+  function drawStorefront(context, label, glow) {
+    context.fillStyle = config.colors.uniform;
+    context.fillRect(0, 0, 100, 100);
+    neon(context, glow);
+    context.lineWidth = 2;
+    context.strokeRect(1, 1, 98, 98);
+    context.fillStyle = glow;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.font = `800 ${label === 'SPÄTI' ? 21 : 13}px system-ui`;
+    context.fillText(label, 50, 17);
+    context.shadowBlur = 0;
+    context.fillStyle = config.colors.road;
+    context.fillRect(7, 34, 49, 59);
+    context.fillRect(65, 34, 28, 65);
+    context.globalAlpha = 0.18;
+    context.fillStyle = glow;
+    context.fillRect(7, 34, 49, 59);
+    context.globalAlpha = 1;
+    context.strokeStyle = glow;
+    context.lineWidth = 1;
+    context.strokeRect(7, 34, 49, 59);
+    context.strokeRect(65, 34, 28, 65);
+    for (let row = 0; row < 3; row++) {
+      strokeLine(context, [[11, 53 + row * 15], [52, 53 + row * 15]], glow, 1);
+      for (let column = 0; column < 5; column++) {
+        context.fillStyle = row % 2 ? config.colors.bottle : glow;
+        context.fillRect(13 + column * 8, 42 + row * 15, 4, 9);
+      }
+    }
+    context.fillStyle = glow;
+    context.fillRect(87, 65, 2, 9);
+    // Striped awning keeps the storefront recognizable without extra silhouette.
+    for (let i = 0; i < 10; i++) {
+      context.fillStyle = i % 2 ? config.colors.uniform : glow;
+      context.fillRect(i * 10, 27, 10, 6);
+    }
+  }
+
   function drawObstacle(obstacle) {
-    ctx.fillStyle = config.colors[obstacle.definition.type];
     const bounds = obstacle.definition.type === 'spaeti'
       ? { x: laneX(obstacle.lane), y: obstacle.y - config.spaetiHeight / 2,
         width: config.obstacleWidth, height: config.spaetiHeight }
       : obstacleDrawBounds(obstacle);
-    rectanglePath(bounds);
-    ctx.fill();
+    drawArtwork(bounds, context => {
+      if (obstacle.definition.type === 'sign') drawSign(context);
+      else if (obstacle.definition.type === 'scooter') drawScooter(context);
+      else drawStorefront(context, 'SPÄTI', config.colors.neonMagenta);
+    });
   }
 
   function drawBottle(bottle) {
-    const point = project(laneX(bottle.lane), bottle.y - config.bottleSize / 2);
-    ctx.fillStyle = config.colors.bottle;
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, config.bottleSize * point.scale / 2, 0, Math.PI * 2);
-    ctx.fill();
+    drawArtwork({ x: laneX(bottle.lane), y: bottle.y - config.bottleSize / 2,
+      width: config.bottleSize, height: config.bottleSize }, context => {
+      neon(context, config.colors.bottle, 5);
+      context.fillStyle = config.colors.bottle;
+      context.beginPath();
+      context.moveTo(38, 4); context.lineTo(62, 4);
+      context.lineTo(62, 29); context.lineTo(77, 43);
+      context.lineTo(77, 96); context.lineTo(23, 96);
+      context.lineTo(23, 43); context.lineTo(38, 29);
+      context.closePath(); context.fill();
+      context.shadowBlur = 0;
+      context.fillStyle = config.colors.uniform;
+      context.fillRect(36, 2, 28, 9);
+      context.fillRect(25, 58, 50, 22);
+      strokeLine(context, [[33, 48], [33, 53]], config.colors.signText, 5);
+      strokeLine(context, [[33, 84], [33, 90]], config.colors.signText, 4);
+      context.fillStyle = config.colors.signText;
+      context.font = '800 15px system-ui';
+      context.textAlign = 'center'; context.textBaseline = 'middle';
+      context.fillText('↻', 50, 69);
+    });
+  }
+
+  function drawPerson(context, inspector = false) {
+    // A continuous distance-driven gait freezes naturally when the run pauses.
+    const running = !reducedMotion.matches && !caught && !finished && player.action === 'run';
+    const stride = running ? Math.sin(elapsed * config.startSpeed / config.playerSize * Math.PI) : 0;
+    const accent = inspector ? config.colors.kontrolleur : config.colors.player;
+    const swing = stride * 9;
+    const sleeves = inspector ? config.colors.uniform : accent;
+    neon(context, accent, 3);
+    strokeLine(context, [[39, 59], [34 - swing, 77], [28 + swing, 95]], config.colors.uniform, 13);
+    strokeLine(context, [[61, 59], [66 + swing, 77], [72 - swing, 95]], config.colors.uniform, 13);
+    strokeLine(context, [[21 + swing, 96], [34 + swing, 96]], accent, 6);
+    strokeLine(context, [[66 - swing, 96], [79 - swing, 96]], accent, 6);
+    strokeLine(context, [[29, 30], [17, 47 + swing], [6, 55 + swing]], sleeves, 11);
+    strokeLine(context, [[71, 30], [83, 47 - swing], [94, 55 - swing]], sleeves, 11);
+    context.fillStyle = inspector ? config.colors.uniform : accent;
+    context.beginPath();
+    context.moveTo(27, 27); context.lineTo(73, 27);
+    context.lineTo(69, 64); context.lineTo(31, 64);
+    context.closePath(); context.fill();
+    context.strokeStyle = accent; context.lineWidth = 2; context.stroke();
+    context.shadowBlur = 0;
+    disc(context, 50, 14, 12, config.colors.uniform);
+    strokeLine(context, [[42, 25], [58, 25]], config.colors.player, 4);
+    if (inspector) {
+      context.fillStyle = config.colors.uniform;
+      context.fillRect(33, 3, 34, 10);
+      strokeLine(context, [[32, 12], [68, 12]], accent, 4);
+      context.fillStyle = accent;
+      context.fillRect(34, 39, 32, 6);
+      context.fillRect(34, 54, 32, 3);
+    } else {
+      // Back-facing hood, backpack, and reflective seams.
+      context.fillStyle = config.colors.uniform;
+      context.fillRect(38, 32, 24, 25);
+      strokeLine(context, [[41, 35], [59, 35]], config.colors.signText, 2);
+      strokeLine(context, [[30, 59], [70, 59]], config.colors.signText, 3);
+    }
   }
 
   function drawPlayer() {
@@ -461,17 +632,35 @@
     const jumpProgress = player.action === 'jump'
       ? 1 - player.actionRemaining / config.jumpDuration : 0;
     const lift = Math.sin(jumpProgress * Math.PI) * config.jumpHeight;
-    ctx.fillStyle = config.colors.player;
-    rectanglePath(playerDrawBounds(), lift, player.action === 'crouch' ? config.crouchScale : 1);
-    ctx.fill();
+    drawArtwork(playerDrawBounds(), context => drawPerson(context), lift,
+      player.action === 'crouch' ? config.crouchScale : 1);
   }
 
   function drawKontrolleur() {
-    ctx.fillStyle = config.colors.kontrolleur;
-    rectanglePath({ x: laneX(player.lane),
+    drawArtwork({ x: laneX(player.lane),
       y: config.playerY + kontrolleurDistance() - config.kontrolleurSize / 2,
-      width: config.kontrolleurSize, height: config.kontrolleurSize });
-    ctx.fill();
+      width: config.kontrolleurSize, height: config.kontrolleurSize },
+    context => drawPerson(context, true));
+  }
+
+  function drawDoenerladen() {
+    // The result overlay covers the road; paint the destination in that overlay.
+    const destination = document.querySelector('#doenerladen');
+    const context = destination.getContext('2d');
+    context.save();
+    context.clearRect(0, 0, destination.width, destination.height);
+    context.translate(12, 10);
+    context.scale((destination.width - 24) / 100, (destination.height - 20) / 100);
+    drawStorefront(context, 'DÖNERLADEN', config.colors.neonAmber);
+    // A warm rotisserie silhouette in the shop window.
+    context.shadowColor = config.colors.neonAmber; context.shadowBlur = 8;
+    strokeLine(context, [[32, 37], [32, 89]], config.colors.signText, 1);
+    context.fillStyle = config.colors.neonAmber;
+    context.beginPath();
+    context.moveTo(19, 43); context.lineTo(45, 43);
+    context.lineTo(38, 77); context.lineTo(26, 77);
+    context.closePath(); context.fill();
+    context.restore();
   }
 
   function draw() {
@@ -492,6 +681,7 @@
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
     if (debugHitboxes) drawHitboxes();
+    if (finished) drawDoenerladen();
   }
 
   function drawHitboxes() {
