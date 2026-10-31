@@ -12,6 +12,7 @@
   const distanceMeter = document.querySelector('#distance');
   const caughtScreen = document.querySelector('#caught');
   const finishedScreen = document.querySelector('#finished');
+  const exchangeScreen = document.querySelector('#exchange');
   const countdown = document.querySelector('#countdown');
   document.querySelector('#restart-key').textContent = config.restartKey.toUpperCase();
   document.querySelector('#finish-restart-key').textContent = config.restartKey.toUpperCase();
@@ -66,8 +67,13 @@
   let firstCrashAt = null;
   let caught = false;
   let finished = false;
-  // Leave enough time for even the tallest hazard to pass completely before the line.
-  const finishClearanceSeconds = (config.playerY - config.spawnY +
+  let finishPhase = 'running';
+  let finishElapsed = 0;
+  let finishResults = null;
+  const approachAt = config.runDurationSeconds - config.finishApproachSeconds;
+  const arrivalSeconds = Math.min(0.3, config.finishAnimationSeconds * 0.1);
+  // Every hazard must leave the scene entirely before the shop appears.
+  const finishClearanceSeconds = (config.worldHeight - config.spawnY +
     Math.max(config.obstacleHeight + config.signPostHeight, config.spaetiHeight)) /
     config.startSpeed + config.maxFrameSeconds;
   const laneWidth = (config.roadRight - config.roadLeft) / config.laneCount;
@@ -87,8 +93,11 @@
     countdown.textContent = `${Math.ceil(Math.max(0, config.runDurationSeconds - elapsed))}s`;
   }
 
-  function finish() {
+  const formatEuros = cents => `€${(cents - cents % 100) / 100}.${String(cents % 100).padStart(2, '0')}`;
+
+  function arrive() {
     finished = true;
+    finishPhase = 'arrival';
     releaseCrouch();
     firstCrashAt = null;
     flashRemaining = 0;
@@ -99,14 +108,24 @@
     const totalCents = pfand * config.bottleValueCents;
     const leftoverCents = totalCents % config.doenerPriceCents;
     const doener = (totalCents - leftoverCents) / config.doenerPriceCents;
-    const formatEuros = cents => `€${(cents - cents % 100) / 100}.${String(cents % 100).padStart(2, '0')}`;
-    document.querySelector('#result-bottles').textContent = String(pfand);
-    document.querySelector('#result-pfand').textContent = formatEuros(totalCents);
-    document.querySelector('#result-doener').textContent = String(doener);
-    document.querySelector('#result-leftover').textContent = `${formatEuros(leftoverCents)} (${formatEuros(config.doenerPriceCents - leftoverCents)} short of Döner #${doener + 1})`;
-    finishedScreen.hidden = false;
+    finishResults = Object.freeze({ bottles: pfand, totalCents, leftoverCents, doener,
+      exchangedBottles: (totalCents - leftoverCents) / config.bottleValueCents,
+      leftoverBottles: leftoverCents / config.bottleValueCents });
     status.textContent = 'You reached the Dönerladen!';
     updatePursuit();
+    if (pfand === 0) showResults();
+  }
+
+  function showResults() {
+    finishPhase = 'results';
+    exchangeScreen.hidden = true;
+    const result = finishResults;
+    document.querySelector('#result-bottles').textContent = String(result.bottles);
+    document.querySelector('#result-pfand').textContent = formatEuros(result.totalCents);
+    document.querySelector('#result-doener').textContent = String(result.doener);
+    document.querySelector('#result-leftover').textContent = `${formatEuros(result.leftoverCents)} (${formatEuros(config.doenerPriceCents - result.leftoverCents)} short of Döner #${result.doener + 1})`;
+    document.querySelector('#finish-message').hidden = result.bottles !== 0;
+    finishedScreen.hidden = false;
   }
 
   function kontrolleurDistance() {
@@ -166,10 +185,15 @@
     firstCrashAt = null;
     caught = false;
     finished = false;
+    finishPhase = 'running';
+    finishElapsed = 0;
+    finishResults = null;
     previousTime = null;
     crashCounter.textContent = '0';
     caughtScreen.hidden = true;
     finishedScreen.hidden = true;
+    exchangeScreen.hidden = true;
+    document.querySelector('#finish-message').hidden = true;
     status.textContent = 'Dodge obstacles to keep the Kontrolleur away.';
     updatePursuit();
     updateCountdown();
@@ -208,6 +232,12 @@
   window.addEventListener('blur', releaseCrouch);
 
   window.addEventListener('keydown', event => {
+    if (finishPhase === 'arrival' || finishPhase === 'exchange') {
+      event.preventDefault();
+      if (finishPhase === 'exchange' && !event.repeat && !document.hidden &&
+          event.key.toLowerCase() !== config.restartKey.toLowerCase()) showResults();
+      return;
+    }
     if (event.key.toLowerCase() === 'h') {
       event.preventDefault();
       if (!event.repeat && !document.hidden) debugHitboxes = !debugHitboxes;
@@ -250,6 +280,15 @@
   document.addEventListener('visibilitychange', () => { previousTime = null; });
 
   function update(dt) {
+    if (finishPhase === 'arrival' || finishPhase === 'exchange') {
+      finishElapsed = Math.min(config.finishAnimationSeconds, finishElapsed + dt);
+      if (finishElapsed >= config.finishAnimationSeconds) showResults();
+      else if (finishElapsed >= arrivalSeconds) {
+        finishPhase = 'exchange';
+        exchangeScreen.hidden = false;
+      }
+      return;
+    }
     if (caught || finished) return;
     dt = Math.min(dt, config.runDurationSeconds - elapsed);
     elapsed += dt;
@@ -260,7 +299,7 @@
     const actionAtStart = player.action;
     const actionTimeAtStart = player.actionRemaining;
     // A row is shared across all lanes. Defer due spawns until it is clear.
-    const hazardsAllowed = elapsed < config.runDurationSeconds - finishClearanceSeconds;
+    const hazardsAllowed = elapsed < approachAt - finishClearanceSeconds;
     if (hazardsAllowed && elapsed >= spawnAt && elapsed - lastRowAt >= config.rowGapSeconds &&
         elapsed - lastObstacleAt >= config.minObstacleGapSeconds) {
       spawnObstacle();
@@ -300,7 +339,7 @@
       }
       if (!obstacle.passed && previousY < config.playerY && obstacle.y >= config.playerY) {
         obstacle.passed = true;
-        if (obstacle.lane === player.lane && !caught && !finished) {
+        if (obstacle.lane === player.lane && !caught && !finished && elapsed < config.runDurationSeconds) {
           if (obstacle.definition.type === 'spaeti') {
             pfand = Math.max(0, pfand - config.spaetiCost);
             pfandCounter.textContent = `Pfand: ${pfand} ${config.bottleEmoji}`;
@@ -336,7 +375,7 @@
     }
     obstacles = obstacles.filter(obstacle => obstacle.y < config.worldHeight +
       Math.max(config.obstacleHeight + config.signPostHeight, config.spaetiHeight));
-    if (elapsed >= config.runDurationSeconds) finish();
+    if (elapsed >= config.runDurationSeconds) arrive();
   }
 
   // Rendering only: shared depth for the road, upright artwork, and ground boxes.
@@ -1050,24 +1089,159 @@
     ctx.restore();
   }
 
+  // Normalized storefront artwork is shared by the approach and result screen.
+  function paintDoenerladen(context) {
+    drawStorefront(context, 'DÖNER', config.colors.neonAmber);
+    // A broad doorway covers every lane; the spit turns inside the amber glazing.
+    context.fillStyle = config.colors.uniform;
+    context.fillRect(6, 34, 88, 66);
+    context.globalAlpha = 0.24;
+    context.fillStyle = config.colors.neonAmber;
+    context.fillRect(6, 34, 88, 66);
+    context.globalAlpha = 1;
+    context.strokeStyle = config.colors.neonAmber;
+    context.strokeRect(6, 34, 88, 66);
+    strokeLine(context, [[50, 34], [50, 100]], config.colors.neonAmber, 0.7);
+    const time = elapsed + finishElapsed;
+    const turn = reducedMotion.matches ? 0 : time * Math.PI;
+    context.shadowColor = config.colors.neonAmber;
+    context.shadowBlur = 8;
+    strokeLine(context, [[27, 40], [27, 94]], config.colors.signText, 1);
+    context.fillStyle = config.colors.neonAmber;
+    context.beginPath();
+    context.moveTo(14, 45); context.lineTo(40, 45);
+    context.lineTo(33, 82); context.lineTo(21, 82);
+    context.closePath(); context.fill();
+    context.shadowBlur = 0;
+    // Surface bands move around the spit at 0.5 Hz, with no flashing.
+    for (let row = 0; row < 6; row++) {
+      const y = 48 + row * 5;
+      const x = 27 + Math.sin(turn + row * 0.4) * (11 - row);
+      strokeLine(context, [[x, y], [x + 2, y + 4]], config.colors.spaetiShop, 1.5);
+    }
+  }
+
+  function finishShopRect() {
+    if (elapsed < approachAt) return null;
+    const progress = Math.min(1, (elapsed - approachAt) / config.finishApproachSeconds);
+    const row = project(config.worldWidth / 2, config.playerY);
+    // Perspective starts just above the horizon, then reaches the player's row exactly.
+    const perspective = 0.045 + progress * 0.955;
+    const width = (config.roadRight - config.roadLeft) * row.roadScale * perspective;
+    const height = viewport.height * 0.52 * perspective;
+    const bottom = row.horizonY + (row.y - row.horizonY) * perspective;
+    return { x: row.x - width / 2, y: bottom - height, width, height, bottom };
+  }
+
+  function drawFinishApproach() {
+    const shop = finishShopRect();
+    if (!shop) return;
+    ctx.save();
+    ctx.translate(shop.x, shop.y);
+    ctx.scale(shop.width / 100, shop.height / 100);
+    paintDoenerladen(ctx);
+    ctx.restore();
+  }
+
   function drawDoenerladen() {
-    // The result overlay covers the road; paint the destination in that overlay.
     const destination = document.querySelector('#doenerladen');
     const context = destination.getContext('2d');
     context.save();
     context.clearRect(0, 0, destination.width, destination.height);
     context.translate(12, 10);
     context.scale((destination.width - 24) / 100, (destination.height - 20) / 100);
-    drawStorefront(context, 'DÖNERLADEN', config.colors.neonAmber);
-    // A warm rotisserie silhouette in the shop window.
-    context.shadowColor = config.colors.neonAmber; context.shadowBlur = 8;
-    strokeLine(context, [[32, 37], [32, 89]], config.colors.signText, 1);
+    paintDoenerladen(context);
+    context.restore();
+  }
+
+  const clamp = value => Math.max(0, Math.min(1, value));
+
+  function exchangePresentation() {
+    const progress = clamp((finishElapsed - arrivalSeconds) /
+      (config.finishAnimationSeconds - arrivalSeconds));
+    return {
+      revealed: Math.ceil(finishResults.bottles * clamp(progress / 0.3)),
+      grouped: motionEase(clamp((progress - 0.3) / 0.1)),
+      converted: clamp((progress - 0.4) / 0.4),
+      cents: Math.round(finishResults.totalCents * clamp(progress / 0.8)),
+    };
+  }
+
+  function paintExchangeBottle(context, x, y, size) {
+    context.fillStyle = config.colors.bottle;
+    context.fillRect(x - size * 0.18, y - size * 0.5, size * 0.36, size * 0.3);
+    context.fillRect(x - size * 0.3, y - size * 0.2, size * 0.6, size * 0.7);
+    context.fillStyle = config.colors.signText;
+    context.fillRect(x - size * 0.25, y + size * 0.1, size * 0.5, size * 0.15);
+  }
+
+  function paintExchangeDoener(context, x, y, size) {
     context.fillStyle = config.colors.neonAmber;
     context.beginPath();
-    context.moveTo(19, 43); context.lineTo(45, 43);
-    context.lineTo(38, 77); context.lineTo(26, 77);
+    context.moveTo(x - size / 2, y - size / 3);
+    context.quadraticCurveTo(x, y - size, x + size / 2, y - size / 3);
+    context.lineTo(x + size / 4, y + size / 2);
+    context.lineTo(x - size / 4, y + size / 2);
     context.closePath(); context.fill();
+    strokeLine(context, [[x - size * 0.35, y - size * 0.18],
+      [x + size * 0.35, y - size * 0.18]], config.colors.bottle, size * 0.14);
+    strokeLine(context, [[x - size * 0.3, y], [x + size * 0.3, y]],
+      config.colors.spaetiShop, size * 0.14);
+  }
+
+  function drawExchange() {
+    const result = finishResults;
+    const view = exchangePresentation();
+    const destination = document.querySelector('#exchange-art');
+    const context = destination.getContext('2d');
+    context.clearRect(0, 0, destination.width, destination.height);
+    context.save();
+    context.textAlign = 'center';
+    context.font = '16px system-ui';
+    // Each token represents an exact, disjoint range of bottles. Work stays bounded.
+    const tokens = Math.min(60, result.bottles);
+    context.globalAlpha = 1 - view.grouped;
+    for (let i = 0; i < tokens; i++) {
+      const first = Math.floor(i * result.bottles / tokens);
+      const last = Math.floor((i + 1) * result.bottles / tokens);
+      const count = Math.max(0, Math.min(last, view.revealed) - first);
+      if (!count) continue;
+      const x = 24 + i % 15 * 48, y = 30 + Math.floor(i / 15) * 70;
+      paintExchangeBottle(context, x, y, 30);
+      if (last - first > 1) {
+        context.fillStyle = config.colors.signText;
+        context.fillText(`×${count}`, x, y + 34);
+      }
+    }
+    const cards = Math.min(4, result.doener);
+    const slots = cards + (result.leftoverBottles > 0 ? 1 : 0);
+    let shownDoener = 0;
+    // Batch whole groups, never discard a group or extend the animation's duration.
+    for (let i = 0; i < slots; i++) {
+      const leftover = i === cards;
+      const count = leftover ? 0 : Math.floor((i + 1) * result.doener / cards) -
+        Math.floor(i * result.doener / cards);
+      const converted = leftover ? 0 : motionEase(clamp(view.converted * cards - i));
+      if (converted === 1) shownDoener += count;
+      const x = (i + 0.5) * 720 / slots;
+      const bottlesInGroup = leftover ? result.leftoverBottles :
+        result.exchangedBottles / result.doener;
+      context.globalAlpha = view.grouped * (1 - converted);
+      for (let b = 0; b < bottlesInGroup; b++) {
+        paintExchangeBottle(context, x - 40 + b % 5 * 20, 75 + Math.floor(b / 5) * 38, 24);
+      }
+      context.globalAlpha = view.grouped * converted;
+      paintExchangeDoener(context, x, 112, reducedMotion.matches ? 70 : 70 * (0.95 + 0.05 * converted));
+      context.globalAlpha = view.grouped;
+      context.fillStyle = config.colors.signText;
+      context.fillText(leftover ? `${result.leftoverBottles} left over` : `${bottlesInGroup} bottles × ${count}`, x, 215);
+      if (!leftover) context.fillText(`→ ${count} Döner`, x, 242);
+    }
     context.restore();
+    document.querySelector('#exchange-bottles').textContent = `Bottles collected: ${view.revealed} / ${result.bottles}`;
+    document.querySelector('#exchange-total').textContent = `Total Pfand: ${formatEuros(view.cents)}`;
+    document.querySelector('#exchange-doener').textContent = `Döner bought: ${shownDoener} / ${result.doener}`;
+    document.querySelector('#exchange-leftover').textContent = `Left over: ${formatEuros(result.leftoverCents)}`;
   }
 
   function draw() {
@@ -1076,6 +1250,7 @@
     ctx.setTransform(viewport.pixelRatio, 0, 0, viewport.pixelRatio, 0, 0);
     observeCharacterMotion();
     drawRoad();
+    drawFinishApproach();
     // Paint far to near without sorting or modifying simulation arrays.
     const pose = characterPose();
     const playerDepth = config.playerY - config.playerSize / 2 + pose.recoil * pose.recoilDistance;
@@ -1098,8 +1273,16 @@
       ctx.fillStyle = config.colors.flash;
       ctx.fillRect(0, 0, viewport.width, viewport.height);
     }
+    if (finishPhase === 'arrival') {
+      ctx.save();
+      ctx.globalAlpha = motionEase(clamp(finishElapsed / arrivalSeconds));
+      ctx.fillStyle = config.colors.uniform;
+      ctx.fillRect(0, 0, viewport.width, viewport.height);
+      ctx.restore();
+    }
     if (debugHitboxes) drawHitboxes();
-    if (finished) drawDoenerladen();
+    if (finishPhase === 'exchange') drawExchange();
+    if (finishPhase === 'results') drawDoenerladen();
   }
 
   function drawHitboxes() {

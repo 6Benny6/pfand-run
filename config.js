@@ -5,6 +5,8 @@ window.GAME_CONFIG = Object.freeze({
   startLane: 1,
   startSpeed: 240,
   runDurationSeconds: 60,
+  finishApproachSeconds: 5,
+  finishAnimationSeconds: 4,
   bottleValueCents: 50,
   doenerPriceCents: 750,
   spawnIntervalMin: 1.1,

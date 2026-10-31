@@ -32,11 +32,21 @@
         <div id="finished" class="caught" role="status" hidden>
           <canvas id="doenerladen" width="320" height="150" aria-label="Dönerladen with an amber neon sign"></canvas>
           <h2>Dönerladen</h2>
+          <p id="finish-message" hidden>No bottles, no Döner.</p>
           <p>Bottles collected: <strong id="result-bottles"></strong></p>
           <p>Total Pfand: <strong id="result-pfand"></strong></p>
           <p>Döner bought: <strong id="result-doener"></strong></p>
           <p>Left over: <strong id="result-leftover"></strong></p>
           <p>Press <kbd id="finish-restart-key"></kbd> to restart</p>
+        </div>
+        <div id="exchange" class="caught" role="status" hidden>
+          <h2>Pfand → Döner</h2>
+          <p id="exchange-bottles"></p>
+          <canvas id="exchange-art" width="720" height="300" aria-label="Collected bottles grouped and exchanged for Döner"></canvas>
+          <p id="exchange-total"></p>
+          <p id="exchange-doener"></p>
+          <p id="exchange-leftover"></p>
+          <p>Any key except <kbd>R</kbd> skips</p>
         </div>
       </div>
       <footer>
