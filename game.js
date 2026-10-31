@@ -40,6 +40,7 @@
 
   const player = { lane: config.startLane, action: 'run', actionRemaining: 0 };
   let crouchHeld = false;
+  let debugHitboxes = config.debugHitboxes;
   let obstacles = [];
   let bottles = [];
   const recentLanes = [];
@@ -62,6 +63,11 @@
     config.startSpeed + config.maxFrameSeconds;
   const laneWidth = (config.roadRight - config.roadLeft) / config.laneCount;
   const laneX = lane => config.roadLeft + laneWidth * (lane + 0.5);
+  // Shrink both ground hitboxes around their existing centers.
+  const overlapCenterY = config.playerY - config.playerSize / 2 + config.obstacleHeight / 2;
+  const overlapHalfHeight = (config.playerSize + config.obstacleHeight) * config.hitboxScale / 2;
+  const overlapStartY = overlapCenterY - overlapHalfHeight;
+  const overlapEndY = overlapCenterY + overlapHalfHeight;
 
   function updateCountdown() {
     countdown.textContent = `${Math.ceil(Math.max(0, config.runDurationSeconds - elapsed))}s`;
@@ -188,6 +194,11 @@
   window.addEventListener('blur', releaseCrouch);
 
   window.addEventListener('keydown', event => {
+    if (event.key.toLowerCase() === 'h') {
+      event.preventDefault();
+      if (!event.repeat && !document.hidden) debugHitboxes = !debugHitboxes;
+      return;
+    }
     if ((caught || finished) && event.key.toLowerCase() === config.restartKey.toLowerCase()) {
       event.preventDefault();
       if (!event.repeat && !document.hidden) restart();
@@ -206,8 +217,8 @@
     if (player.lane !== previousLane) {
       for (const obstacle of obstacles) {
         if (obstacle.definition.type !== 'spaeti' && !obstacle.crashed &&
-            obstacle.lane === previousLane && obstacle.y > config.playerY - config.playerSize &&
-            obstacle.y < config.playerY + config.obstacleHeight) {
+            obstacle.lane === previousLane && obstacle.y > overlapStartY &&
+            obstacle.y < overlapEndY) {
           obstacle.passed = true; // Leaving during overlap clears this obstacle.
         }
       }
@@ -256,9 +267,9 @@
         if (obstacle.passed || obstacle.crashed) continue;
         // Sweep the full frame against the player's fixed ground footprint.
         const overlapStart = Math.max(0,
-          (config.playerY - config.playerSize - previousY) / config.startSpeed);
+          (overlapStartY - previousY) / config.startSpeed);
         const overlapEnd = Math.min(dt,
-          (config.playerY + config.obstacleHeight - previousY) / config.startSpeed);
+          (overlapEndY - previousY) / config.startSpeed);
         if (overlapStart < overlapEnd && obstacle.lane === player.lane) {
           const correctAction = actionAtStart === obstacle.definition.requiredAction;
           if (!correctAction || actionTimeAtStart < overlapEnd) {
@@ -268,7 +279,7 @@
             if (caught) break;
           }
         }
-        if (obstacle.y >= config.playerY + config.obstacleHeight) obstacle.passed = true;
+        if (obstacle.y >= overlapEndY) obstacle.passed = true;
         continue;
       }
       if (!obstacle.passed && previousY < config.playerY && obstacle.y >= config.playerY) {
@@ -387,6 +398,37 @@
       ctx.fillStyle = config.flashColor;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
+    if (debugHitboxes) drawHitboxes();
+  }
+
+  function drawHitboxes() {
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#58e5ff';
+    const playerSize = config.playerSize * config.hitboxScale;
+    // Collision uses ground centers, without jump lift, crouch scale, or sign posts.
+    ctx.strokeRect(laneX(player.lane) - playerSize / 2,
+      config.playerY - config.playerSize / 2 - playerSize / 2, playerSize, playerSize);
+    const width = config.obstacleWidth * config.hitboxScale;
+    const height = config.obstacleHeight * config.hitboxScale;
+    let overlapping = false;
+    for (const obstacle of obstacles) {
+      if (obstacle.definition.type === 'spaeti') continue;
+      const overlap = obstacle.lane === player.lane &&
+        obstacle.y > overlapStartY && obstacle.y < overlapEndY;
+      overlapping ||= overlap;
+      ctx.strokeStyle = overlap ? '#ff6b6b' : '#ffe066';
+      ctx.strokeRect(laneX(obstacle.lane) - width / 2,
+        obstacle.y - config.obstacleHeight / 2 - height / 2, width, height);
+    }
+    ctx.fillStyle = '#111';
+    ctx.fillRect(8, 8, 112, 24);
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px system-ui';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`Overlap: ${overlapping ? 'yes' : 'no'}`, 14, 20);
+    ctx.restore();
   }
 
   function frame(time) {

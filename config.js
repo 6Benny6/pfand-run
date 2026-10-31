@@ -39,6 +39,8 @@ window.GAME_CONFIG = Object.freeze({
   spawnY: -60,
   playerY: 590,
   playerSize: 48,
+  hitboxScale: 0.7,
+  debugHitboxes: false,
   jumpHeight: 65,
   crouchScale: 0.55,
   obstacleWidth: 90,
