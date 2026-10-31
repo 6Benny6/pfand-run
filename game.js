@@ -546,7 +546,7 @@
       x + panelWidth - 45 * scale, itemY + scale, scale);
     let nextY = barY + barHeight + 8;
     if (firstCrashAt !== null && !finished) {
-      pixelPanel(x, nextY, panelWidth, 25 * scale + 12);
+      pixelPanel(x, nextY, panelWidth, 17 * scale + 7);
       pixelText('KONTROLLEUR!', center, nextY + 7, scale, ui.pink, 'center');
       const segmentWidth = Math.floor((panelWidth - 24) / 16);
       const filled = Math.ceil(distanceMeter.value * 16 / 100);
@@ -554,7 +554,7 @@
         ctx.fillStyle = i < filled ? ui.lime : ui.shade;
         ctx.fillRect(x + 12 + i * segmentWidth, nextY + 12 * scale, segmentWidth - 2, 5 * scale);
       }
-      nextY += 25 * scale + 20;
+      nextY += 17 * scale + 15;
     }
     if (debugHitboxes) {
       pixelText(`CRASHES ${crashes}`, width - 12, nextY, scale, ui.red, 'right');
@@ -583,7 +583,7 @@
 
   // Rendering only: shared depth for the road, upright artwork, and ground boxes.
   // Omitting y intersects a road edge with the bottom of the viewport.
-  function project(x, y) {
+  function project(x, y, exact = false) {
     const horizonY = viewport.height * (config.camera.horizonY / config.worldHeight + 0.05);
     const playerScreenY = viewport.height * 0.84;
     const screenDepth = viewport.height - horizonY;
@@ -593,7 +593,9 @@
       (1 - config.camera.minimumScale);
     const depth = y === undefined ? cameraDepth * playerDepth / screenDepth
       : cameraDepth + config.playerY - y;
-    const perspective = cameraDepth / depth;
+    if (depth <= 0) return null;
+    // Artwork never exceeds twice the player-row scale; debug geometry stays exact.
+    const perspective = exact ? cameraDepth / depth : Math.min(2, cameraDepth / depth);
     // Ground framing adapts to aspect ratio; upright height uses vertical FOV.
     const roadScale = viewport.width * 1.12 / (config.roadRight - config.roadLeft) *
       playerDepth / screenDepth * perspective;
@@ -620,6 +622,7 @@
     const point = project(bounds.x, bounds.y);
     const cameraDepth = (config.playerY - config.spawnY) * config.camera.minimumScale /
       (1 - config.camera.minimumScale);
+    if (!point || bounds.y + bounds.height / 2 >= config.playerY + cameraDepth) return;
     const perspective = point.scale / (viewport.height / (config.playerSize * 4));
     objectFrame = {
       worldX: bounds.x, worldY: bounds.y, x: point.x, y: point.y,
@@ -634,6 +637,7 @@
     const frame = objectFrame;
     if (!frame) {
       const point = project(x, y);
+      if (!point) return null;
       return { ...point, x: snapPixel(point.x), y: snapPixel(point.y - height * point.scale) };
     }
     return {
@@ -659,15 +663,16 @@
   // Project all four real ground-box corners; the sprite stands on its near edge.
   // This stays independent of the upright artwork's pose and height.
   function rectanglePath(bounds, lift = 0, heightScale = 1) {
-    const center = project(bounds.x, bounds.y);
-    const bottom = project(bounds.x, bounds.y + bounds.height / 2);
+    ctx.beginPath();
+    const center = project(bounds.x, bounds.y, true);
+    const bottom = project(bounds.x, bounds.y + bounds.height / 2, true);
     const corners = [
       [bounds.x - bounds.width / 2, bounds.y - bounds.height / 2],
       [bounds.x + bounds.width / 2, bounds.y - bounds.height / 2],
       [bounds.x + bounds.width / 2, bounds.y + bounds.height / 2],
       [bounds.x - bounds.width / 2, bounds.y + bounds.height / 2],
-    ].map(([x, y]) => project(x, y));
-    ctx.beginPath();
+    ].map(([x, y]) => project(x, y, true));
+    if (!center || !bottom || corners.some(point => !point)) return;
     corners.forEach((point, index) => {
       const y = bottom.y - (bottom.y - point.y) * heightScale - lift * center.scale;
       if (index === 0) ctx.moveTo(point.x, y);
@@ -699,14 +704,14 @@
         const start = project(x, grainY);
         const end = project(x + 0.7, grainY + 1.5);
         ctx.globalAlpha = 0.07 + roadNoise(row, grain * 3 + 2) * 0.08;
-        ctx.strokeStyle = grain % 3 ? config.colors.lane : config.colors.uniform;
+        ctx.strokeStyle = grain % 3 ? config.colors.worldLane : config.colors.worldRoad;
         ctx.lineWidth = Math.max(0.4, start.roadScale * 0.5);
         ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
       }
       if (row % 7 === 0) {
         const x = config.roadLeft + roadNoise(row, 71) * roadWidth;
         ctx.globalAlpha = 0.32;
-        ctx.fillStyle = config.colors.uniform;
+        ctx.fillStyle = config.colors.worldRoad;
         const patch = [project(x, y), project(x + 29, y + 3),
           project(x + 34, y + 21), project(x - 4, y + 18)];
         facePath(ctx, patch); ctx.fill();
@@ -714,7 +719,7 @@
       if (row % 5 === 0) {
         const x = config.roadLeft + roadNoise(row, 79) * roadWidth;
         ctx.globalAlpha = 0.5;
-        ctx.strokeStyle = config.colors.uniform;
+        ctx.strokeStyle = config.colors.worldRoad;
         ctx.lineWidth = Math.max(0.6, project(x, y).roadScale * 0.6);
         ctx.beginPath();
         for (let segment = 0; segment < 5; segment++) {
@@ -729,13 +734,139 @@
     ctx.restore();
   }
 
-  function drawRoad() {
-    ctx.fillStyle = config.colors.sky;
+  let atmosphere = null;
+
+  function drawBackdrop() {
+    const horizon = project(config.worldWidth / 2, config.playerY).horizonY;
+    // Cache gradients until a resize/DPR change; no game RNG or backdrop simulation.
+    if (!atmosphere || atmosphere.height !== viewport.height || atmosphere.ratio !== viewport.pixelRatio) {
+      const sky = ctx.createLinearGradient(0, 0, 0, horizon);
+      sky.addColorStop(0, config.colors.worldSkyTop);
+      sky.addColorStop(1, config.colors.worldSkyHorizon);
+      const haze = ctx.createLinearGradient(0, horizon - 30, 0, horizon + 30);
+      haze.addColorStop(0, config.colors.worldHazeClear);
+      haze.addColorStop(0.5, config.colors.worldHaze);
+      haze.addColorStop(1, config.colors.worldHazeClear);
+      atmosphere = { height: viewport.height, ratio: viewport.pixelRatio, sky, haze };
+    }
+    ctx.fillStyle = config.colors.worldConcrete;
     ctx.fillRect(0, 0, viewport.width, viewport.height);
+    ctx.fillStyle = atmosphere.sky;
+    ctx.fillRect(0, 0, viewport.width, Math.ceil(horizon));
+    ctx.fillStyle = config.colors.worldSkyline;
+    const skylineUnit = viewport.width / 36;
+    for (let i = 0; i < 36; i++) {
+      const height = (0.01 + roadNoise(i, 201) * 0.04) * viewport.height;
+      ctx.fillRect(Math.floor(i * skylineUnit), Math.floor(horizon - height), Math.ceil(skylineUnit), Math.ceil(height));
+    }
+    const phase = elapsed / config.runDurationSeconds * 4;
+    const landmark = Math.min(3, Math.floor(phase));
+    const blend = landmark === 0 ? 1 : Math.min(1, (phase - landmark) / 0.12);
+    if (landmark > 0 && blend < 1) drawLandmark(landmark - 1, horizon, 1 - blend);
+    drawLandmark(landmark, horizon, blend);
+    drawStreetBuildings();
+    ctx.fillStyle = atmosphere.haze;
+    ctx.fillRect(0, horizon - 30, viewport.width, 60);
+  }
+
+  function drawLandmark(index, horizon, opacity) {
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    const unit = Math.min(1.8, viewport.width / 480, viewport.height / 600);
+    ctx.translate(viewport.width / 2, horizon + 2);
+    ctx.scale(unit, unit);
+    const color = config.colors.worldMonument;
+    ctx.fillStyle = color;
+    if (index === 0) {
+      // Fernsehturm: slender shaft, observation sphere, antenna.
+      ctx.fillRect(-3, -90, 6, 90);
+      ctx.fillRect(-1, -132, 2, 42);
+      ctx.beginPath(); ctx.ellipse(0, -91, 13, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(-8, -100, 16, 3);
+    } else if (index === 1) {
+      // Brandenburger Tor: six columns, entablature and a small quadriga silhouette.
+      ctx.fillRect(-76, -48, 152, 10);
+      ctx.fillRect(-66, -55, 132, 7);
+      ctx.fillRect(-79, -4, 158, 4);
+      for (let i = 0; i < 6; i++) ctx.fillRect(-62 + i * 23, -38, 9, 34);
+      ctx.fillRect(-18, -62, 36, 7);
+      strokeLine(ctx, [[-15, -65], [-6, -69], [0, -66], [6, -69], [15, -65]], color, 5);
+      ctx.fillRect(-1, -78, 2, 14);
+    } else if (index === 2) {
+      // Oberbaumbrücke: repeated open arches between twin pointed brick towers.
+      ctx.beginPath(); ctx.rect(-90, -20, 180, 20);
+      for (let x = -72; x <= 72; x += 24) {
+        ctx.moveTo(x - 8, 0); ctx.lineTo(x - 8, -8);
+        ctx.quadraticCurveTo(x, -23, x + 8, -8);
+        ctx.lineTo(x + 8, 0); ctx.closePath();
+      }
+      ctx.fill('evenodd');
+      for (const x of [-51, 51]) {
+        ctx.fillRect(x - 9, -56, 18, 56);
+        ctx.beginPath(); ctx.moveTo(x - 12, -56); ctx.lineTo(x, -76);
+        ctx.lineTo(x + 12, -56); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillRect(-90, -25, 180, 5);
+    } else {
+      // Siegessäule: broad plinth, narrow column and winged Victoria.
+      ctx.fillRect(-19, -9, 38, 9); ctx.fillRect(-13, -20, 26, 11);
+      ctx.fillRect(-4, -91, 8, 71); ctx.fillRect(-8, -94, 16, 5);
+      ctx.fillRect(-3, -108, 6, 14);
+      ctx.beginPath();
+      ctx.moveTo(-2, -105); ctx.lineTo(-17, -116); ctx.lineTo(-12, -102);
+      ctx.lineTo(0, -98); ctx.lineTo(12, -110); ctx.lineTo(15, -123);
+      ctx.lineTo(2, -106); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, -112, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawStreetBuildings() {
+    const spacing = config.worldHeight / 4;
+    const travel = elapsed * config.startSpeed;
+    const phase = travel % spacing;
+    for (let row = 0; row < 4; row++) {
+      const y = config.spawnY + row * spacing + phase;
+      if (y >= config.playerY) continue;
+      const block = Math.floor(travel / spacing) - row;
+      for (const side of [-1, 1]) {
+        const edge = side < 0 ? config.roadLeft : config.roadRight;
+        const point = project(edge + side * laneWidth * 0.5, y);
+        if (!point) continue;
+        const width = laneWidth * 0.68 * point.roadScale;
+        const height = (65 + roadNoise(block, side + 210) * 40) * point.scale;
+        const left = snapPixel(point.x - width / 2), top = snapPixel(point.y - height);
+        ctx.fillStyle = config.colors.worldBuilding;
+        ctx.fillRect(left, top, Math.ceil(width), Math.ceil(height));
+        ctx.fillStyle = config.colors.worldBuildingSide;
+        ctx.fillRect(side < 0 ? left + width * 0.8 : left, top, width * 0.2, height);
+        ctx.fillStyle = config.colors.worldWindow;
+        const windowSize = Math.max(1, Math.round(point.scale * 1.3));
+        for (let floor = 1; floor <= 5; floor++) {
+          for (let column = 1; column <= 4; column++) {
+            if (roadNoise(block * 23 + floor * 4 + column, side + 220) > 0.24) continue;
+            ctx.fillRect(Math.round(left + width * column / 6), Math.round(top + height * floor / 7),
+              windowSize, windowSize * 2);
+          }
+        }
+        const lamp = project(edge + side * laneWidth * 0.09, y);
+        const lampTop = snapPixel(lamp.y - 65 * lamp.scale);
+        strokeLine(ctx, [[lamp.x, lamp.y], [lamp.x, lampTop],
+          [lamp.x - side * 9 * lamp.scale, lampTop]], config.colors.worldHardware,
+        Math.max(1, snapPixel(1.2 * lamp.scale)));
+        ctx.fillStyle = config.colors.worldLamp;
+        ctx.fillRect(snapPixel(lamp.x - side * 9 * lamp.scale - 2 * lamp.scale), lampTop,
+          Math.max(2, snapPixel(4 * lamp.scale)), Math.max(1, snapPixel(2 * lamp.scale)));
+      }
+    }
+  }
+
+  function drawRoad() {
+    drawBackdrop();
     const bottomLeft = project(config.roadLeft);
     const bottomRight = project(config.roadRight);
     const sidewalkWidth = laneWidth / 10;
-    ctx.fillStyle = config.colors.pavement;
+    ctx.fillStyle = config.colors.worldConcrete;
     for (const [edge, outside] of [
       [config.roadLeft, config.roadLeft - sidewalkWidth],
       [config.roadRight, config.roadRight + sidewalkWidth],
@@ -749,7 +880,7 @@
       ctx.closePath();
       ctx.fill();
     }
-    ctx.fillStyle = config.colors.road;
+    ctx.fillStyle = config.colors.worldRoad;
     ctx.beginPath();
     ctx.moveTo(viewport.width / 2, bottomLeft.horizonY);
     ctx.lineTo(bottomRight.x, bottomRight.y);
@@ -760,7 +891,7 @@
     ctx.clip(); // Surface details remain inside the straight road edges.
     drawRoadTexture();
     ctx.restore();
-    ctx.strokeStyle = config.colors.lane;
+    ctx.strokeStyle = config.colors.worldLane;
     // Dashes travel in world space at the unchanged world speed.
     const period = config.dashLength + config.dashGap;
     const offset = elapsed * config.startSpeed % period;
@@ -904,7 +1035,8 @@
   }
 
   // Shade with existing palette colors; no extra color or gameplay settings.
-  function drawFace(points, color, light = 0, glow = color) {
+  function drawFace(points, color, light = 0, glow = false) {
+    if (points.some(point => !point)) return;
     ctx.save();
     const opacity = ctx.globalAlpha;
     facePath(ctx, points);
@@ -920,18 +1052,25 @@
       ctx.strokeStyle = glow;
       ctx.lineWidth = Math.max(1, Math.round(viewport.height / config.worldHeight)) * 2 / viewport.pixelRatio;
       ctx.shadowColor = glow;
-      ctx.shadowBlur = 0;
+      ctx.shadowBlur = 4 * viewport.pixelRatio;
       ctx.stroke();
     }
     ctx.restore();
   }
 
   function drawGroundShadow(bounds) {
+    const point = artworkPoint(bounds.x, bounds.y + bounds.height * 0.35);
+    if (!point) return;
+    const radiusX = Math.min(bounds.width * point.roadScale * 0.48, viewport.width * 0.12);
+    const radiusY = Math.min(radiusX * 0.2, viewport.height * 0.016);
     ctx.save();
-    ctx.fillStyle = config.colors.playerShadow;
-    ctx.shadowColor = config.colors.playerShadow;
-    ctx.shadowBlur = 0;
-    rectanglePath(bounds);
+    ctx.translate(point.x, point.y);
+    ctx.scale(radiusX, radiusY);
+    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    shadow.addColorStop(0, config.colors.worldShadow);
+    shadow.addColorStop(1, config.colors.worldShadowClear);
+    ctx.fillStyle = shadow;
+    ctx.beginPath(); ctx.arc(0, 0, 1, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -960,7 +1099,7 @@
 
   // Extrude an x/height silhouette through its exact world ground footprint.
   // Horizontal upper edges become light top faces; vertical edges become dark sides.
-  function drawProfile(bounds, profile, color, paint, glow = color) {
+  function drawProfile(bounds, profile, color, paint, glow = false) {
     const front = profile.map(([u, z]) => volumePoint(bounds, u, 1, z));
     const back = profile.map(([u, z]) => volumePoint(bounds, u, 0, z));
     for (let i = 0; i < profile.length; i++) {
@@ -975,7 +1114,7 @@
     }
   }
 
-  function drawVolume(bounds, bottom, top, color, paint, glow = color) {
+  function drawVolume(bounds, bottom, top, color, paint, glow = false) {
     drawProfile(bounds, [[0, bottom], [1, bottom], [1, top], [0, top]], color, paint, glow);
   }
 
@@ -1008,7 +1147,7 @@
   function neon(context, color, blur = 6) {
     context.strokeStyle = color;
     context.shadowColor = color;
-    context.shadowBlur = 0;
+    context.shadowBlur = blur;
   }
 
   function strokeLine(context, points, color, width) {
@@ -1041,6 +1180,7 @@
         neon(context, config.colors.signText);
         context.lineWidth = 2;
         context.strokeRect(3, 3, 94, 94);
+        context.shadowBlur = 0;
         context.fillStyle = config.colors.signText;
         bitmapText(context, 'U', 50, 15, 10, ui.white, 'center');
         context.shadowBlur = 0;
@@ -1052,7 +1192,7 @@
         context.fillRect(90, 9, 6, 87);
         context.fillRect(4, 90, 86, 6);
         context.globalAlpha = opacity;
-      });
+      }, config.colors.signText);
   }
 
   function drawGroundBeam(bounds, start, end, thickness, bottom, top) {
@@ -1067,10 +1207,9 @@
     const base = corners.map(([x, y]) => volumePoint(bounds, x, y, bottom));
     for (let i = 0; i < 4; i++) {
       const next = (i + 1) % 4;
-      drawFace([base[i], base[next], roof[next], roof[i]], config.colors.signText,
-        -0.4, config.colors.scooter);
+      drawFace([base[i], base[next], roof[next], roof[i]], config.colors.worldHardware, -0.4);
     }
-    drawFace(roof, config.colors.signText, 0.15, config.colors.scooter);
+    drawFace(roof, config.colors.worldHardware);
   }
 
   function drawScooter(bounds) {
@@ -1083,17 +1222,14 @@
       drawProfile(wheel, Array.from({ length: 16 }, (_, i) => {
         const angle = i * Math.PI / 8;
         return [0.5 + Math.cos(angle) / 2, wheelSize * (0.5 + Math.sin(angle) / 2)];
-      }), config.colors.uniform, context => {
-        disc(context, 50, 50, 24, config.colors.signText);
-        disc(context, 50, 50, 10, config.colors.scooter);
-      }, config.colors.scooter);
+      }), config.colors.worldHardware, context => {
+        disc(context, 50, 50, 16, config.colors.worldHub);
+      });
     }
     const deck = { ...bounds, width: bounds.width * 0.8,
       x: bounds.x,
       height: bounds.height * 0.18, y: bounds.y + bounds.height * 0.35 };
-    drawVolume(deck, wheelSize * 0.35, wheelSize * 0.7, config.colors.signText,
-      context => strokeLine(context, [[10, 30], [90, 30]], config.colors.scooter, 14),
-      config.colors.scooter);
+    drawVolume(deck, wheelSize * 0.35, wheelSize * 0.7, config.colors.scooter);
     const thickness = config.laneLineWidth * 1.6;
     const deckLeft = volumePoint(deck, 0, 1, wheelSize * 0.7);
     const deckRight = volumePoint(deck, 1, 1, wheelSize * 0.7);
@@ -1104,7 +1240,7 @@
     // Measure after projection so the proportion holds at every viewport size.
     const stemTop = stemBottom + deckPixels * 0.75 /
       artworkPoint(stem.x, stem.y + stem.height / 2).scale;
-    drawVolume(stem, stemBottom, stemTop, config.colors.signText, null, config.colors.scooter);
+    drawVolume(stem, stemBottom, stemTop, config.colors.worldHardware);
     drawGroundBeam(bounds, [0.72, 0.85], [0.97, 0.85], thickness,
       stemTop - thickness * 0.5, stemTop + thickness * 0.5);
   }
@@ -1114,7 +1250,7 @@
     context.fillRect(0, 0, 100, 100);
     neon(context, glow);
     context.lineWidth = 2;
-    context.strokeRect(1, 1, 98, 98);
+    context.strokeRect(2, 2, 96, 24);
     context.fillStyle = glow;
     context.textAlign = 'center';
     context.textBaseline = 'middle';
@@ -1149,7 +1285,14 @@
     }
   }
 
+  function streetOpacity(y) {
+    // Fade only the final half-player-length before the row, then draw nothing.
+    return clamp((config.playerY - y) / (config.playerSize * 0.5));
+  }
+
   function drawObstacle(obstacle) {
+    const opacity = streetOpacity(obstacle.y);
+    if (opacity === 0) return;
     const impact = signImpactVisual(obstacle);
     if (impact?.opacity === 0) return;
     const renderY = impact ? impact.y : obstacle.y;
@@ -1159,20 +1302,25 @@
       : obstacleDrawBounds({ ...obstacle, y: renderY });
     withObjectFrame(bounds, () => {
       ctx.save();
+      ctx.globalAlpha *= opacity;
       if (impact) ctx.globalAlpha *= impact.opacity;
       drawGroundShadow(bounds);
       if (obstacle.definition.type === 'sign') drawSign(bounds);
       else if (obstacle.definition.type === 'scooter') drawScooter(bounds);
       else drawVolume(bounds, 0, config.spaetiHeight, config.colors.spaetiShop,
-        context => drawStorefront(context, 'SPÄTI', config.colors.neonMagenta), config.colors.neonMagenta);
+        context => drawStorefront(context, 'SPÄTI', config.colors.neonMagenta));
       ctx.restore();
     });
   }
 
   function drawBottle(bottle) {
+    const opacity = streetOpacity(bottle.y);
+    if (opacity === 0) return;
     const bounds = { x: laneX(bottle.lane), y: bottle.y - config.bottleSize / 2,
       width: config.bottleSize, height: config.bottleSize };
     withObjectFrame(bounds, () => {
+      ctx.save();
+      ctx.globalAlpha *= opacity;
       const height = config.bottleSize;
       drawGroundShadow(bounds);
       const profile = [[0, 0], [1, 0], [1, height * 0.58], [0.7, height * 0.77],
@@ -1186,12 +1334,12 @@
         context.fillRect(0, 58, 100, 22);
         context.fillStyle = config.colors.signText;
         bitmapText(context, 'P', 50, 61, 2, ui.white, 'center');
-        neon(context, config.colors.signText, 3);
         strokeLine(context, [[35, 12], [35, 24], [18, 43], [18, 52]], config.colors.signText, 5);
         strokeLine(context, [[18, 85], [18, 93]], config.colors.signText, 4);
       });
       drawVolume({ ...bounds, width: bounds.width * 0.44 }, height * 0.94, height,
-        config.colors.uniform, null, config.colors.bottle);
+        config.colors.uniform);
+      ctx.restore();
     });
   }
 
@@ -1200,7 +1348,6 @@
     const accent = inspector ? config.colors.kontrolleurBlue : config.colors.player;
     const trim = inspector ? config.colors.kontrolleurYellow : accent;
     const sleeves = accent;
-    neon(context, accent, 2);
     const foot = offset => {
       const phase = ((gait.phase / (Math.PI * 2) + offset) % 1 + 1) % 1;
       const planted = phase < 0.58;
@@ -1246,7 +1393,6 @@
     context.lineTo(33, 58); context.quadraticCurveTo(50, 63, 67, 58);
     context.lineTo(78, 30); context.quadraticCurveTo(73, 24, 62, 24);
     context.closePath(); context.fill();
-    context.strokeStyle = accent; context.lineWidth = 1.5; context.stroke();
     context.shadowBlur = 0;
     // Compensate for the artwork transform so heads remain round on tall windows.
     const headRadiusX = 7.5 / aspect;
@@ -1309,15 +1455,15 @@
   function drawImpactContact() {
     const impact = characterMotion.impactObstacle;
     const pose = characterPose();
-    if (!impact || impact.definition.type !== 'sign' || pose.recoil <= 0) return;
+    if (!impact || impact.y >= config.playerY || impact.definition.type !== 'sign' || pose.recoil <= 0) return;
     const visual = signImpactVisual(impact);
     if (!visual || visual.opacity === 0) return;
     const bounds = obstacleDrawBounds({ ...impact, y: visual.y });
     const point = volumePoint(bounds, 0.5, 1, config.signPostHeight);
+    if (!point) return;
     const radius = Math.max(5, config.playerSize * project(bounds.x, bounds.y).scale * 0.17);
     ctx.save();
     ctx.globalAlpha = pose.recoil * visual.opacity;
-    neon(ctx, config.colors.signText, 9 * viewport.pixelRatio);
     ctx.lineWidth = Math.max(1.5, viewport.height / config.worldHeight);
     ctx.beginPath();
     ctx.ellipse(point.x, point.y, radius, radius * 0.65, 0, 0, Math.PI * 2);

@@ -9,15 +9,26 @@ const root = path.resolve(__dirname, '..');
 function game(reduceMotion = false, { width = 1280, height = 720, pixelRatio = 1 } = {}) {
   const listeners = {}, elements = new Map(), labels = [];
   const rectangles = [];
+  const operations = [];
   let recordRectangles = false;
   const noop = () => {};
   const context = new Proxy({ globalAlpha: 1 }, {
     get(target, key) {
       if (key in target) return target[key];
-      if (key === 'createLinearGradient') return () => ({ addColorStop: noop });
+      if (key === 'createLinearGradient' || key === 'createRadialGradient') return (...args) => {
+        if (recordRectangles) operations.push([key, ...args]);
+        return { addColorStop: noop };
+      };
       if (key === 'fillText') return text => labels.push(text);
-      if (key === 'fillRect') return (...args) => { if (recordRectangles) rectangles.push(args); };
-      return noop;
+      if (key === 'fillRect') return (...args) => {
+        if (recordRectangles) { rectangles.push(args); operations.push([key, ...args]); }
+      };
+      return recordRectangles ? (...args) => operations.push([key, ...args]) : noop;
+    },
+    set(target, key, value) {
+      target[key] = value;
+      if (recordRectangles) operations.push(['set', key, value]);
+      return true;
     },
   });
   const element = id => {
@@ -43,6 +54,7 @@ function game(reduceMotion = false, { width = 1280, height = 720, pixelRatio = 1
     const originalBitmapText = bitmapText;
     bitmapText = (context, text, ...args) => { window.labels.push(String(text)); originalBitmapText(context, text, ...args); };
     window.test = { update, draw, restart, finishShopRect, exchangePresentation, project, pixelText, pixelIcon,
+      drawObstacle, drawBottle, drawPlayer, rectanglePath, streetOpacity, drawBackdrop,
       geometry: (bounds, vertices) => {
         let result;
         withObjectFrame(bounds, () => { result = vertices.map(([u, v, z]) => volumePoint(bounds, u, v, z)); });
@@ -65,7 +77,8 @@ function game(reduceMotion = false, { width = 1280, height = 720, pixelRatio = 1
   api.element = element;
   api.labels = labels;
   api.rectangles = rectangles;
-  api.captureRectangles = () => { recordRectangles = true; rectangles.length = 0; };
+  api.operations = operations;
+  api.captureRectangles = () => { recordRectangles = true; rectangles.length = 0; operations.length = 0; };
   api.config = sandbox.window.GAME_CONFIG;
   api.advance = seconds => {
     while (seconds > 1e-9) {
@@ -283,5 +296,87 @@ test('HUD uses live score and leaves game state unchanged in portrait and landsc
     g.key('h');
     g.draw();
     assert.ok(g.labels.includes('CRASHES 0'));
+  }
+});
+
+test('passed street objects and their shadows stop drawing without leaving simulation', () => {
+  const g = game();
+  for (const type of ['sign', 'scooter', 'spaeti', 'bottle']) {
+    for (const y of [590, 591, 720, 868.6, 1000]) {
+      const object = { lane: 1, y, definition: { type } };
+      g.set(type === 'bottle' ? { bottles: [object] } : { obstacles: [object] });
+      const before = JSON.stringify(g.state());
+      g.captureRectangles();
+      if (type === 'bottle') g.drawBottle(object);
+      else g.drawObstacle(object);
+      assert.equal(g.operations.length, 0, `${type} still drew at ${y}`);
+      assert.equal(JSON.stringify(g.state()), before);
+    }
+  }
+  assert.equal(g.streetOpacity(590), 0);
+  assert.ok(g.streetOpacity(589) > 0);
+});
+
+test('artwork projection is capped and rejects the camera plane and everything behind it', () => {
+  const g = game();
+  const cameraY = g.config.playerY + (g.config.playerY - g.config.spawnY) *
+    g.config.camera.minimumScale / (1 - g.config.camera.minimumScale);
+  const playerScale = g.project(240, g.config.playerY).scale;
+  assert.equal(g.project(240, cameraY), null);
+  assert.equal(g.project(240, cameraY + 100), null);
+  assert.ok(Math.abs(g.project(240, cameraY - 0.001).scale - playerScale * 2) < 1e-9);
+  assert.ok(g.project(240, cameraY - 0.001, true).scale > playerScale * 2);
+});
+
+test('H still draws exact collision boxes after artwork is culled', () => {
+  const g = game();
+  g.set({ time: 10, obstacles: [{ lane: 1, y: 615, definition: { type: 'scooter' } }] });
+  g.key('h');
+  g.draw();
+  assert.ok(g.labels.includes('OVERLAP YES'));
+  g.captureRectangles();
+  const bounds = { x: 240, y: 780, width: 63, height: 29.4 };
+  g.rectanglePath(bounds);
+  const vertex = g.operations.find(operation => operation[0] === 'moveTo');
+  const exact = g.project(bounds.x - bounds.width / 2, bounds.y - bounds.height / 2, true);
+  assert.equal(vertex[1], exact.x);
+  assert.equal(vertex[2], exact.y);
+  g.captureRectangles();
+  g.rectanglePath({ ...bounds, y: 1000 });
+  assert.ok(!g.operations.some(operation => operation[0] === 'moveTo'));
+});
+
+test('runner, scooter and bottles have no glow; only the requested signs do', () => {
+  for (const type of ['runner', 'scooter', 'bottle', 'sign', 'spaeti']) {
+    const g = game();
+    g.captureRectangles();
+    if (type === 'runner') g.drawPlayer();
+    else if (type === 'bottle') g.drawBottle({ lane: 1, y: 500 });
+    else g.drawObstacle({ lane: 1, y: 500, definition: { type } });
+    const glowing = g.operations.some(operation => operation[0] === 'set' &&
+      operation[1] === 'shadowBlur' && operation[2] > 0);
+    assert.equal(glowing, type === 'sign' || type === 'spaeti', type);
+    if (type === 'runner' || type === 'scooter') {
+      assert.ok(g.operations.some(operation => operation[0] === 'createRadialGradient'));
+    }
+  }
+});
+
+test('all four backdrop phases render with bounded work, cached gradients and no game-state changes', () => {
+  for (const [width, height] of [[390, 844], [1440, 900]]) {
+    const g = game(false, { width, height, pixelRatio: 2 });
+    for (const time of [0, 15, 16, 30, 31, 45, 46, 60]) {
+      g.set({ time });
+      const before = JSON.stringify(g.state());
+      g.captureRectangles();
+      g.drawBackdrop();
+      assert.equal(JSON.stringify(g.state()), before);
+      assert.ok(g.operations.length < 1000);
+      assert.equal(g.operations.filter(operation => operation[0] === 'createLinearGradient').length,
+        time === 0 ? 2 : 0);
+      for (const operation of g.operations) {
+        assert.ok(operation.filter(value => typeof value === 'number').every(Number.isFinite));
+      }
+    }
   }
 });
