@@ -40,9 +40,13 @@ collected.
 
 
 ## Ending
-- Survive 60 seconds: the Dönerladen appears and the end screen shows
-  bottles collected, total Pfand in euros, and the number of Döner.
-- Caught: the run ends with a "caught" screen and a restart key.
+- Survive 60 seconds: in the last 5 seconds the Dönerladen appears ahead
+  and the player runs into it, arriving exactly at 60 seconds. The Kontrolleur
+  disappears. A short animation shows all collected bottles, which are then
+  exchanged for Döner. Then the end screen shows bottles collected, total
+  Pfand in euros, the number of Döner and the leftover.
+- Caught: the run ends with a "caught" screen and a restart key. The player
+  cannot be caught after entering the Dönerladen.
 
 ## Look
 The game is seen from behind the runner, with the road narrowing toward
