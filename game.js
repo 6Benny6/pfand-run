@@ -796,7 +796,7 @@
   }
 
   function drawScooter(bounds) {
-    // Wheelbase crosses the road; the tipped stem points along the road.
+    // Wheelbase crosses the road; the stem rises from the deck's front axle.
     const wheelSize = bounds.width * 0.14;
     for (const u of [0.1, 0.9]) {
       const wheel = { ...bounds, x: bounds.x + (u - 0.5) * bounds.width,
@@ -817,10 +817,18 @@
       context => strokeLine(context, [[10, 30], [90, 30]], config.colors.scooter, 14),
       config.colors.scooter);
     const thickness = config.laneLineWidth * 1.6;
-    drawGroundBeam(bounds, [0.9, 0.9], [0.9, 0.065], thickness,
-      thickness * 0.5, thickness * 1.5);
-    drawGroundBeam(bounds, [0.72, 0.065], [0.97, 0.065], thickness,
-      thickness * 0.5, thickness * 1.5);
+    const deckLeft = volumePoint(deck, 0, 1, wheelSize * 0.7);
+    const deckRight = volumePoint(deck, 1, 1, wheelSize * 0.7);
+    const deckPixels = Math.hypot(deckRight.x - deckLeft.x, deckRight.y - deckLeft.y);
+    const stem = { ...bounds, x: bounds.x + bounds.width * 0.4,
+      y: deck.y, width: thickness, height: deck.height };
+    const stemBottom = wheelSize * 0.7;
+    // Measure after projection so the proportion holds at every viewport size.
+    const stemTop = stemBottom + deckPixels * 0.75 /
+      project(stem.x, stem.y + stem.height / 2).scale;
+    drawVolume(stem, stemBottom, stemTop, config.colors.signText, null, config.colors.scooter);
+    drawGroundBeam(bounds, [0.72, 0.85], [0.97, 0.85], thickness,
+      stemTop - thickness * 0.5, stemTop + thickness * 0.5);
   }
 
   function drawStorefront(context, label, glow) {
