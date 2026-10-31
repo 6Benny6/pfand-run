@@ -330,79 +330,165 @@
     if (elapsed >= config.runDurationSeconds) finish();
   }
 
-  function draw() {
-    ctx.fillStyle = config.pavementColor;
+  // Rendering only: one reciprocal depth for road, objects, and hitboxes.
+  function project(x, y) {
+    const { horizonY, playerScreenY } = config.camera;
+    const screenDepth = canvas.height - horizonY;
+    const playerDepth = playerScreenY - horizonY;
+    // Map the player's row as before and the world bottom to the canvas bottom.
+    const cameraDepth = (config.worldHeight - config.playerY) * screenDepth /
+      (canvas.height - playerScreenY);
+    const playerScale = canvas.width * 0.8 / (config.roadRight - config.roadLeft) *
+      playerDepth / screenDepth;
+    const depth = cameraDepth + config.playerY - y;
+    const scale = playerScale * cameraDepth / depth;
+    return {
+      x: canvas.width / 2 + (x - config.worldWidth / 2) * scale,
+      y: horizonY + playerDepth * scale / playerScale,
+      scale,
+    };
+  }
+
+  // These bounds mirror the ground geometry used by overlapBounds(), not artwork.
+  function playerDrawBounds() {
+    const size = config.playerSize * config.hitboxScale;
+    return { x: laneX(player.lane), y: config.playerY - config.playerSize / 2,
+      width: size, height: size };
+  }
+
+  function obstacleDrawBounds(obstacle) {
+    const scale = obstacleHitboxScale(obstacle);
+    return { x: laneX(obstacle.lane), y: obstacle.y - config.obstacleHeight / 2,
+      width: config.obstacleWidth * scale, height: config.obstacleHeight * scale };
+  }
+
+  // Project both longitudinal edges so visual contact matches ground overlap.
+  // Filled primitives and the H overlay deliberately share this exact path.
+  function rectanglePath(bounds, lift = 0, heightScale = 1) {
+    const center = project(bounds.x, bounds.y);
+    const bottom = project(bounds.x, bounds.y + bounds.height / 2);
+    const corners = [
+      [bounds.x - bounds.width / 2, bounds.y - bounds.height / 2],
+      [bounds.x + bounds.width / 2, bounds.y - bounds.height / 2],
+      [bounds.x + bounds.width / 2, bounds.y + bounds.height / 2],
+      [bounds.x - bounds.width / 2, bounds.y + bounds.height / 2],
+    ].map(([x, y]) => project(x, y));
+    ctx.beginPath();
+    corners.forEach((point, index) => {
+      const y = bottom.y - (bottom.y - point.y) * heightScale - lift * center.scale;
+      if (index === 0) ctx.moveTo(point.x, y);
+      else ctx.lineTo(point.x, y);
+    });
+    ctx.closePath();
+  }
+
+  function drawRoad() {
+    ctx.fillStyle = config.colors.sky;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = config.roadColor;
-    ctx.fillRect(config.roadLeft, 0, config.roadRight - config.roadLeft, canvas.height);
-    ctx.strokeStyle = config.laneColor;
-    ctx.lineWidth = config.laneLineWidth;
-    ctx.setLineDash([config.dashLength, config.dashGap]);
-    ctx.lineDashOffset = -elapsed * config.startSpeed;
+    const bottomLeft = project(config.roadLeft, config.worldHeight);
+    const bottomRight = project(config.roadRight, config.worldHeight);
+    const sidewalkWidth = laneWidth / 10;
+    ctx.fillStyle = config.colors.pavement;
+    for (const [edge, outside] of [
+      [config.roadLeft, config.roadLeft - sidewalkWidth],
+      [config.roadRight, config.roadRight + sidewalkWidth],
+    ]) {
+      const inner = project(edge, config.worldHeight);
+      const outer = project(outside, config.worldHeight);
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2, config.camera.horizonY);
+      ctx.lineTo(inner.x, inner.y);
+      ctx.lineTo(outer.x, outer.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = config.colors.road;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, config.camera.horizonY);
+    ctx.lineTo(bottomRight.x, bottomRight.y);
+    ctx.lineTo(bottomLeft.x, bottomLeft.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = config.colors.lane;
+    // Dashes travel in world space at the unchanged world speed.
+    const period = config.dashLength + config.dashGap;
+    const offset = elapsed * config.startSpeed % period;
     for (let lane = 1; lane < config.laneCount; lane++) {
       const x = config.roadLeft + lane * laneWidth;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    for (const obstacle of obstacles) {
-      const x = laneX(obstacle.lane);
-      const { definition, y } = obstacle;
-      if (definition.type === 'spaeti') {
-        const left = x - config.obstacleWidth / 2;
-        const top = y - config.spaetiHeight;
-        ctx.fillStyle = definition.shopColor;
-        ctx.fillRect(left, top, config.obstacleWidth, config.spaetiHeight);
-        ctx.fillStyle = definition.color;
-        ctx.fillRect(left, top, config.obstacleWidth, config.obstacleHeight);
-        ctx.fillRect(left + config.spaetiWindowInset, top + config.obstacleHeight + config.spaetiWindowInset,
-          config.obstacleWidth - config.spaetiWindowInset * 2,
-          config.spaetiHeight - config.obstacleHeight - config.spaetiWindowInset * 2);
-        ctx.fillStyle = definition.textColor;
-        ctx.font = `bold ${config.spaetiLabelSize}px system-ui`;
-        ctx.fillText(definition.label, x, top + config.obstacleHeight / 2);
-        continue;
+      const distant = project(x, config.spawnY - period);
+      ctx.lineWidth = config.laneLineWidth * distant.scale;
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2, config.camera.horizonY);
+      ctx.lineTo(distant.x, distant.y);
+      ctx.stroke();
+      for (let y = config.spawnY - period + offset; y < config.worldHeight; y += period) {
+        const start = project(x, y);
+        const end = project(x, y + config.dashLength);
+        ctx.lineWidth = config.laneLineWidth * start.scale;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
       }
-      const height = config.obstacleHeight;
-      const signOffset = definition.type === 'sign' ? config.signPostHeight : 0;
-      ctx.fillStyle = definition.color;
-      if (signOffset) {
-        ctx.fillRect(x - config.obstacleWidth / 2, y - signOffset, config.laneLineWidth, signOffset);
-        ctx.fillRect(x + config.obstacleWidth / 2 - config.laneLineWidth, y - signOffset, config.laneLineWidth, signOffset);
-      }
-      ctx.fillRect(x - config.obstacleWidth / 2, y - signOffset - height, config.obstacleWidth, height);
-      ctx.fillStyle = definition.textColor;
-      ctx.font = `bold ${config.obstacleFontSize}px system-ui`;
-      ctx.fillText(definition.label, x, y - signOffset - height / 2);
     }
-    ctx.font = `${config.bottleSize}px system-ui`;
-    for (const bottle of bottles) {
-      ctx.fillText(config.bottleEmoji, laneX(bottle.lane), bottle.y - config.bottleSize / 2);
-    }
-    const x = laneX(player.lane);
-    ctx.fillStyle = config.playerShadowColor;
-    ctx.beginPath();
-    ctx.ellipse(x, config.playerY, config.shadowWidth, config.shadowHeight, 0, 0, Math.PI * 2);
+  }
+
+  function drawObstacle(obstacle) {
+    ctx.fillStyle = config.colors[obstacle.definition.type];
+    const bounds = obstacle.definition.type === 'spaeti'
+      ? { x: laneX(obstacle.lane), y: obstacle.y - config.spaetiHeight / 2,
+        width: config.obstacleWidth, height: config.spaetiHeight }
+      : obstacleDrawBounds(obstacle);
+    rectanglePath(bounds);
     ctx.fill();
-    const jumping = player.action === 'jump';
-    const jumpProgress = jumping ? 1 - player.actionRemaining / config.jumpDuration : 0;
+  }
+
+  function drawBottle(bottle) {
+    const point = project(laneX(bottle.lane), bottle.y - config.bottleSize / 2);
+    ctx.fillStyle = config.colors.bottle;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, config.bottleSize * point.scale / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawPlayer() {
+    const ground = project(laneX(player.lane), config.playerY);
+    ctx.fillStyle = config.colors.playerShadow;
+    ctx.beginPath();
+    ctx.ellipse(ground.x, ground.y, config.shadowWidth * ground.scale,
+      config.shadowHeight * ground.scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const jumpProgress = player.action === 'jump'
+      ? 1 - player.actionRemaining / config.jumpDuration : 0;
     const lift = Math.sin(jumpProgress * Math.PI) * config.jumpHeight;
-    ctx.save();
-    ctx.translate(x, config.playerY - config.playerSize / 2 - lift);
-    if (player.action === 'crouch') {
-      ctx.translate(0, config.playerSize * (1 - config.crouchScale) / 2);
-      ctx.scale(1, config.crouchScale);
-    }
-    ctx.font = `${config.playerSize}px system-ui`;
-    ctx.fillText(config.playerEmoji, 0, 0);
-    ctx.restore();
-    if (firstCrashAt !== null) {
-      ctx.font = `${config.kontrolleurSize}px system-ui`;
-      ctx.fillText(config.kontrolleurEmoji, x, config.playerY + kontrolleurDistance() - config.kontrolleurSize / 2);
-    }
+    ctx.fillStyle = config.colors.player;
+    rectanglePath(playerDrawBounds(), lift, player.action === 'crouch' ? config.crouchScale : 1);
+    ctx.fill();
+  }
+
+  function drawKontrolleur() {
+    ctx.fillStyle = config.colors.kontrolleur;
+    rectanglePath({ x: laneX(player.lane),
+      y: config.playerY + kontrolleurDistance() - config.kontrolleurSize / 2,
+      width: config.kontrolleurSize, height: config.kontrolleurSize });
+    ctx.fill();
+  }
+
+  function draw() {
+    drawRoad();
+    // Paint far to near without sorting or modifying simulation arrays.
+    const scene = [
+      ...obstacles.map(obstacle => ({ y: obstacle.y - config.obstacleHeight / 2,
+        draw: () => drawObstacle(obstacle) })),
+      ...bottles.map(bottle => ({ y: bottle.y - config.bottleSize / 2,
+        draw: () => drawBottle(bottle) })),
+      { y: config.playerY - config.playerSize / 2, draw: drawPlayer },
+    ];
+    if (firstCrashAt !== null) scene.push({ y: config.playerY + kontrolleurDistance(), draw: drawKontrolleur });
+    scene.sort((a, b) => a.y - b.y);
+    for (const item of scene) item.draw();
     if (flashRemaining > 0) {
-      ctx.fillStyle = config.flashColor;
+      ctx.fillStyle = config.colors.flash;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
     if (debugHitboxes) drawHitboxes();
@@ -411,27 +497,24 @@
   function drawHitboxes() {
     ctx.save();
     ctx.lineWidth = 1;
-    ctx.strokeStyle = '#58e5ff';
-    const playerSize = config.playerSize * config.hitboxScale;
-    // Collision uses ground centers, without jump lift, crouch scale, or sign posts.
-    ctx.strokeRect(laneX(player.lane) - playerSize / 2,
-      config.playerY - config.playerSize / 2 - playerSize / 2, playerSize, playerSize);
+    ctx.strokeStyle = config.colors.debugPlayer;
+    // Ground footprint stays fixed during jump and crouch, exactly as in logic.
+    rectanglePath(playerDrawBounds());
+    ctx.stroke();
     let overlapping = false;
     for (const obstacle of obstacles) {
       if (obstacle.definition.type === 'spaeti') continue;
       const { overlapStartY, overlapEndY } = overlapBounds(obstacle);
-      const width = config.obstacleWidth * obstacleHitboxScale(obstacle);
-      const height = config.obstacleHeight * obstacleHitboxScale(obstacle);
       const overlap = obstacle.lane === player.lane &&
         obstacle.y > overlapStartY && obstacle.y < overlapEndY;
       overlapping ||= overlap;
-      ctx.strokeStyle = overlap ? '#ff6b6b' : '#ffe066';
-      ctx.strokeRect(laneX(obstacle.lane) - width / 2,
-        obstacle.y - config.obstacleHeight / 2 - height / 2, width, height);
+      ctx.strokeStyle = overlap ? config.colors.debugOverlap : config.colors.debugObstacle;
+      rectanglePath(obstacleDrawBounds(obstacle));
+      ctx.stroke();
     }
-    ctx.fillStyle = '#111';
+    ctx.fillStyle = config.colors.debugBackground;
     ctx.fillRect(8, 8, 112, 24);
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = config.colors.debugText;
     ctx.font = '12px system-ui';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
